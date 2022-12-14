@@ -1,0 +1,1064 @@
+Option Explicit
+
+Const CTBCRByPrachaitVersion = "Busy Custom Report - BCR PS_02ReciptNComm - Version PS20221213-1030"
+Const CTBCRByDevelopedPrachaitContactInformation = "Developed By Prachait Saxena, +919450901908, info@prachait.com"
+Const CTBCRScriptFileName = "PS_02ReciptNComm.vbs"
+Const CTBCRScriptLogFileName = "PS_02ReciptNComm.txt"
+'
+'
+'The Custom Report is to calculate the comission of Salesperson and Collection Agent.
+'
+'
+'
+'Current Filters in use
+'Account, Item, Material Center, Sales Person, Date, Party Name, Ignore Party Name, Profit Percentage to Sales Person, Ignore Purchase Price Reduction
+'
+'Todo:
+'1. Implementaion of filters
+'Voucher Group, Voucher Series
+'2. Implementtion of Ignore Internal Lapking Purchase Price
+'Change Log BCR PS_02ReciptNComm - Version PS20221125-1030
+'20221124 2200
+'Finaliation of the salesperson and collection agent commission percentage, after the discussion between Sanjay, Manu, Prachait and approval by Sanjay
+'20221125 1730
+'Correction on Number of digits in Amount, changed to 16.2
+'PS20221126-1730
+'if Salesperson or collection agent is not present, the report will still calcuate the commission
+'PS20221202-1030
+'Enter Key is activated to view the voucher and receipt
+'jrnl entry is now visible with receipts.
+
+Const CTBCRTodo = "Todo: Filter on min and max day"
+Const CTBCRResponsbilePersonForReport = "To be reported by Tanu (Accounts) to management"
+
+
+Dim objFSO
+Dim objTextFile
+
+Dim BusyLib
+Dim BusyGrid
+Dim BusyOnEnter
+Dim BusyConst
+Dim BusyRepOpt
+Dim BusyCompConfig
+Dim m_QuitRep
+
+Dim varErrorLogFile
+Dim varErrorMessage
+Dim varErrorStatus
+
+Dim	dtmThisDay
+Dim	dtmThisMonth
+Dim	dtmThisYear
+Dim dtmThisHour
+Dim dtmThisMinute
+Dim dtmThisSecond
+
+
+'Ref Vch Date
+'Ref Vch No
+'Saleman Name
+'Party Name
+'Party Code
+'Zone
+'Territory
+'City
+'PincodeText
+'Party Contact
+'Party WhatsAppNo
+'Territory Manager
+'Account Manager
+'Type
+'KYC Status
+'Amount Adjusted
+'Due in Days
+'Number of Days in Adjustment
+'Due Days Minus Adjustment Days
+'Transaction Amount
+'Collection Agent Name
+'Funds Received By
+'Funds Receipt Mode
+'Short Narration
+'Receipt Date
+'Receipt VchNo
+'Reference Method
+'Last Remarks By Party Date
+'Last Remarks By Party Description
+'Last Remarks By Party Reported By
+'Salesman Name
+'Salesman Commission
+'Collection Agent Name
+'Collection Agent Commission
+
+Const CTSalesmanComission0To10Days = 0.03
+Const CTSalesmanComission11To20Days = 0.02
+Const CTSalesmanComission21To30Days = 0.01
+Const CTSalesmanComission31To60Days = 0
+Const CTSalesmanComissionAbove60Days = -0.07
+
+Const CTCollectionAgentComission0To10Days = 0.03
+Const CTCollectionAgentComission11To20Days = 0.03
+Const CTCollectionAgentComission21To30Days = 0.03
+Const CTCollectionAgentComission31To60Days = 0.03
+Const CTCollectionAgentComissionAbove60Days = 0.03
+
+Const CTAssumed10GPofAdjustmentAmountforCommission = 0.1
+
+Public Sub GenerateRep()
+	
+	On Error Resume Next	
+	
+	Dim SelectQuery
+	Dim RecordSet
+	Dim OldVchCode 
+	
+	Dim varTTFReferenceMethod
+	Dim varRefVchDate
+	Dim varRefVchNo
+	Dim varSalemanName
+	Dim varPartyName
+	Dim varPartyCode
+	Dim varZone
+	Dim varTerritory
+	Dim varCity
+	Dim varPincode
+	Dim varPartyContact
+	Dim varPartyWhatsAppNo
+	Dim varTerritoryManager
+	Dim varAccountManager
+	Dim varType
+	Dim varKYCStatus
+	Dim varAmountAdjusted
+	Dim varDueinDays
+	Dim varNumberofDaysinAdjustment
+	Dim varDueDaysMinusAdjustmentDays
+	Dim varTransactionAmount
+	Dim varCollectionAgentName
+	Dim varFundsReceivedBy
+	Dim varFundsReceiptMode
+	Dim varShortNarration
+	Dim varReceiptDate
+	Dim varReceiptVchNo
+	Dim varReferenceMethod
+	Dim varLastRemarksByPartyDate
+	Dim varLastRemarksByPartyDescription
+	Dim varLastRemarksByPartyReportedBy
+	Dim varAssumed10GPofAdjustmentAmountforCommission				
+	Dim	varSalesmanCommissionPercentageBasedonDays
+	Dim varSalesmanCommission
+	Dim	varCollectionAgentCommissionPercentageBasedonDays	
+	Dim varCollectionAgentCommission
+	
+	Dim varVoucherType
+	Dim varVoucherCode
+	
+	OldVchCode=0
+	
+	Dim varCounter
+	
+	'Setup Filters from the Report Options
+	'START_DATE	Starting Receipt Date
+	'END_DATE	Ending Receipt Date
+	'ACCOUNT_RANGE	Select Account Master Range
+	'BROKER_RANGE	Salesman Name
+	'TEXT1	Collection Agent (Ex. %Sarvesh%)
+	'TEXT2	Party Name (Use % Example %Prachait%)
+	'TEXT3	Ignore Party Name(s) (Ex. %Lapking%)
+	'TEXT4	Min Number of Days in Adjustment
+	'TEXT5	Max Number of Days in Adjustment	
+	
+	'Filter For Account Master
+	'Variables Used in BusyReportOptions
+	Dim varAccountMasterSelectionType
+	Dim varAccountMasterCodes
+	Dim varAccountMasterParentGroupCode
+	Dim varAccountMasterSelected
+	Dim varAccountMasterSelectedCodes
+	
+	'WriteInEventLog "Account Master Range "&BusyRepOpt.OptAccRange,CTBCRScriptLogFileName
+	varAccountMasterSelectionType = BusyRepOpt.OptAccRange
+	If BusyRepOpt.OptAccRange = 1  Then	'One Account Selected
+		varAccountMasterCodes = BusyRepOpt.OptAccCode
+		'WriteInEventLog "OptAccCode "&BusyRepOpt.OptAccCode,CTBCRScriptLogFileName 'For Single Selection Only
+	ElseIf BusyRepOpt.OptAccRange = 2  Then	'Account Group Selected
+		varAccountMasterParentGroupCode = BusyRepOpt.OptAGRPCode
+		'WriteInEventLog "OptAGRPCode "&BusyRepOpt.OptAGRPCode,CTBCRScriptLogFileName			
+	ElseIf BusyRepOpt.OptAccRange = 3  Then	'All Accounts
+		
+	ElseIf BusyRepOpt.OptAccRange = 4  Then	'Selected Accounts	
+		Set varAccountMasterSelectedCodes = BusyRepOpt.OptAccRangeSelectedCol
+		If varAccountMasterSelectedCodes.Count > 0 Then
+			For varCounter = 1 To varAccountMasterSelectedCodes.Count
+				varAccountMasterCodes =  varAccountMasterCodes & BusyLib.GetItemFromCol(varAccountMasterSelectedCodes, varCounter) & "," 
+			Next 
+		End If 
+		varAccountMasterCodes =  Left(varAccountMasterCodes,Len(varAccountMasterCodes)-1)  
+		If Len(varAccountMasterCodes)=0 Then varAccountMasterCodes="" 
+		varCounter = 0
+		'WriteInEventLog "varAccountMasterCodes "&varAccountMasterCodes,CTBCRScriptLogFileName 'For Single Selection Only
+	End If
+	
+	'Filter For Salesman
+	Dim varSalesmanSelectionType
+	Dim varSalesmanCodes
+	Dim varSalesmanParentGroupCode
+	Dim varSalesmanSelected
+	Dim varSalesmanSelectedCodes
+	
+	'WriteInEventLog "Salesman Range "&BusyRepOpt.OptBrokerRange,CTBCRScriptLogFileName
+	varSalesmanSelectionType = BusyRepOpt.OptBrokerRange
+	If BusyRepOpt.OptBrokerRange = 1  Then	'One Item Selected
+		varSalesmanCodes = BusyRepOpt.OptBrokerCode
+		'WriteInEventLog "OptBrokerCode "&BusyRepOpt.OptBrokerCode,CTBCRScriptLogFileName 'For Single Selection Only
+	ElseIf BusyRepOpt.OptBrokerRange = 2  Then	'Item Group Selected
+		'varSalesmanParentGroupCode = BusyRepOpt.OptIGrpCode
+		'WriteInEventLog "OptAGRPCode "&BusyRepOpt.OptIGrpCode,CTBCRScriptLogFileName			
+	ElseIf BusyRepOpt.OptBrokerRange = 3  Then	'All Items
+		
+	ElseIf BusyRepOpt.OptBrokerRange = 4  Then	'Selected Items	
+		Set varSalesmanSelectedCodes = BusyRepOpt.OptBrokerRangeSelectedCol
+		If varSalesmanSelectedCodes.Count > 0 Then
+			For varCounter = 1 To varSalesmanSelectedCodes.Count
+				varSalesmanCodes =  varSalesmanCodes & BusyLib.GetItemFromCol(varSalesmanSelectedCodes, varCounter) & "," 
+			Next 
+		End If 
+		varSalesmanCodes =  Left(varSalesmanCodes,Len(varSalesmanCodes)-1)  
+		If Len(varSalesmanCodes)=0 Then varSalesmanCodes="" 
+		varCounter = 0
+		'WriteInEventLog "varSalesmanCodes "&varSalesmanCodes,CTBCRScriptLogFileName 'For Single Selection Only
+	End If
+	
+	'Collection Agent
+	'TEXT1	Collection Agent (Ex. %Sarvesh%)	
+	Dim varCollectionAgentNameToSearch
+	varCollectionAgentNameToSearch = BusyRepOpt.OptText1
+	
+	'Filter Party Name with Text
+	'TEXT2	Party Name (Use % Example %Prachait%)
+	Dim varPartyNameTextToSearch
+	varPartyNameTextToSearch = BusyRepOpt.OptText2
+	
+	'Filter Ignore Party Name with Text
+	'TEXT3	Ignore Party Name(s) (Ex. %Lapking%)	
+	Dim varIgnorePartyNameTextToSearch
+	varIgnorePartyNameTextToSearch = BusyRepOpt.OptText3
+	
+	
+	'TEXT4	Min Number of Days in Adjustment
+	Dim varMinNumberofDaysinAdjustment
+	varMinNumberofDaysinAdjustment = BusyRepOpt.OptText4
+	
+	'TEXT5	Max Number of Days in Adjustment	
+	Dim varMaxNumberofDaysinAdjustment
+	varMaxNumberofDaysinAdjustment = BusyRepOpt.OptText5
+	
+	
+	'/****** Script for SelectTopNRows command from SSMS  ******/
+	'SELECT
+	'	ISNULL(TableTransactionReferences.[RefCode],0) As TTRRefCode
+	'	,ISNULL(TableReferenceDetails.[Date],'') As TRDReferenceVoucherDate
+	'	,ISNULL(TableTransactionReferences.[DueDate],'') As TTRDueDate
+	'	,ISNULL(LTRIM(RTRIM(TableTransactionReferences.[No])),'') As TTRVchNo
+	'	,ISNULL(TableSalesmanMaster.[Name],'') As TSMSalesVoucherBySalemanName
+	'	,TableReceiptInTransaction.[MasterCode1] As TRINPartyCode
+	'	,TableAccountMaster.[Name] As TAMAccountName
+	'	,TableAccountMaster.[Alias] As TPMAlias
+	'	,TableAccountMasterDetailedInfo.[OF2] As TAMAIZoneCode
+	'	,ISNull(TableZoneMaster.[Name],'') As TZMName
+	'	,TableAccountMasterDetailedInfo.[OF3] As TAMAITerritoryCode
+	'	,ISNULL(TableTerritoryMaster.[Name],'') As TTMName
+	'	,TableAccountMasterDetailedInfo.[OF4] As TAMAICityCode
+	'	,ISNULL(TableCityMaster.[Name],'') As TCMName
+	'	,TableAccountMasterDetailedInfo.[PINCode] As PINCode
+	'	,TableAccountMasterDetailedInfo.[Contact] As TAMDIPartyContact
+	'	,TableAccountMasterDetailedInfo.[WhatsAppNo] As TAMDIWhatsAppNo
+	'	,ISNULL(TableAccountMasterDetailedInfo.[OF5],'') As TAMAITerritoryManagerCode
+	'	,ISNULL(TableTerritoryManagerMaster.[Name],'') As TTMMName
+	'	,ISNULL(TableAccountMasterDetailedInfo.[OF6],'') As TAMAIAccountManagerCode
+	'	,ISNULL(TableAccountManagerMaster.[Name],'') As TAMMName
+	'	,ISNULL(TableAccountMasterDetailedInfo.[OF7],'') As TAMDIPartyTypeCode
+	'	,ISNULL(TablePartyTypeMaster.[Name],'') As TAMDIPartyTypeName
+	'	,ISNULL(TableAccountMasterDetailedInfo.[OF8],'') As TAMDIPartyKYCStatusCode
+	'	,ISNULL(TablePartyKYCStatusMaster.[Name],'') As TAMDIPartyKYCStatusName
+	'	,ISNULL(TableTransactionReferences.[Value1],'') As TRFAmountAdjusted
+	'	,ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TableTransactionReferences.[DueDate]),'') As DueInDays
+	'	,ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TableReceiptInTransaction.[Date]),'') As NumberOfDaysInAdjustment
+	'	,(ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TableTransactionReferences.[DueDate]),'') - ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TableReceiptInTransaction.[Date]),'')) As DueDaysMinusAdjustmentDays
+	'	,TableReceiptInTransaction.[Value1] As TRITTransactionAmount
+	'	,ISNULL(TableCollectionAgentMaster.[Name],'') As TCAMCollectionAgentName
+	'	,ISNULL(TableFundsReceivedBy.[Name],'') As TFRBFundsReceivedBy
+	'	,ISNULL(TableFundsReceiptMode.[Name],'') As TFRMFundsReceiptMode
+	'	,TableReceiptInTransaction.[ShortNar] As ShortNarration
+	'	,TableReceiptInTransaction.[VchCode] As TRITVchCode
+	'	,TableReceiptInTransaction.[SrNo] As TRITSrNo
+	'	,TableReceiptInTransaction.[Date] As TRITReceiptDate
+	'	,LTRIM(RTRIM(TableReceiptInTransaction.[VchNo])) As TRITReceiptVchNo
+	'	,ISNULL(TableTransactionReferences.[Method],0) As TTFReferenceMethod
+	'	,ISNULL(TableReportNotes.TRNDate,'') As LastRemarksByPartyDate
+	'	,ISNULL(TableReportNotes.[TRNDescription],'') As LastRemarksByPartyDescription
+	'	,ISNULL(TableReportNotes.TRNUsername,'') As LastRemarksByPartyReportedBy
+	'	,ISNULL(TableSalesmanMaster.[Name],'') As TSMSalesVoucherBySalemanName
+	'	, ''  As SalemanComission /*(ISNULL(TableTransactionReferences.[Value1],0)*0.001) As SalemanComission*/
+	'	,ISNULL(TableCollectionAgentMaster.[Name],'') As TCAMCollectionAgentName
+	'	,'' AS CollectionAgentComissoin /*(ISNULL(TableTransactionReferences.[Value1],0)*0.002) As CollectionAgentComissoin*/
+	'/*
+	',TableTransactionReferences.*
+	',TableReceiptInTransaction.*
+	',TableTransactionReferences.*
+	',TableReferenceDetails.*
+	'*/
+	'FROM [Tran2] As TableReceiptInTransaction
+	'	LEFT JOIN [VchOtherInfo] As TableReceiptVoucherOtherInfo 
+	'		ON TableReceiptInTransaction.[VchCode] = TableReceiptVoucherOtherInfo.[VchCode]
+	'	LEFT JOIN [Master1] As TableAccountMaster 
+	'		ON TableReceiptInTransaction.[MasterCode1] = TableAccountMaster.[Code]
+	'	LEFT JOIN [MasterAddressInfo] As TableAccountMasterDetailedInfo 
+	'		ON TableReceiptInTransaction.[MasterCode1] = TableAccountMasterDetailedInfo.[MasterCode] 
+	'	LEFT JOIN [Master1] As TableZoneMaster 
+	'		ON TableZoneMaster.[Code] = TableAccountMasterDetailedInfo.[OF2]  
+	'	LEFT JOIN [Master1] As TableTerritoryMaster 
+	'		ON TableTerritoryMaster.[Code] = TableAccountMasterDetailedInfo.[OF3]  
+	'	LEFT JOIN [Master1] As TableCityMaster 
+	'		ON TableCityMaster.[Code] = TableAccountMasterDetailedInfo.[OF4]  
+	'	LEFT JOIN [Master1] As TableTerritoryManagerMaster 
+	'		ON TableTerritoryManagerMaster.[Code] = TableAccountMasterDetailedInfo.[OF5]  
+	'	LEFT JOIN [Master1] As TableAccountManagerMaster 
+	'		ON TableAccountManagerMaster.[Code] = TableAccountMasterDetailedInfo.[OF6] 
+	'	LEFT JOIN [Master1] As TablePartyTypeMaster 
+	'		ON TablePartyTypeMaster.[Code] = TableAccountMasterDetailedInfo.[OF7] 
+	'	LEFT JOIN [Master1] As TablePartyKYCStatusMaster 
+	'		ON TablePartyKYCStatusMaster.[Code] = TableAccountMasterDetailedInfo.[OF8] 
+	'	LEFT JOIN [Master1] As TableFundsReceivedBy
+	'		ON TableFundsReceivedBy.[Code] = TableReceiptVoucherOtherInfo.[OF1] 
+	'	LEFT JOIN [Master1] As TableFundsReceiptMode
+	'		ON TableFundsReceiptMode.[Code] = TableReceiptVoucherOtherInfo.[OF2] 
+	'	LEFT JOIN [Master1] As TableCollectionAgentMaster 
+	'		ON TableReceiptInTransaction.[CM6] = TableCollectionAgentMaster.[Code]
+	'	LEFT JOIN [Tran3] As TableTransactionReferences
+	'		ON TableReceiptInTransaction.[VchCode] = TableTransactionReferences.[VchCode]
+	'		AND TableReceiptInTransaction.[MasterCode1] = TableTransactionReferences.[MasterCode1]
+	'	LEFT JOIN [Tran1] As TableReferenceDetails
+	'		ON TableReceiptInTransaction.[MasterCode1] = TableReferenceDetails.[MasterCode1]
+	'		AND TableTransactionReferences.[No] = TableReferenceDetails.[VchNo]
+	'	LEFT JOIN [Master1] As TableSalesmanMaster 
+	'	ON TableReferenceDetails.[CM4] = TableSalesmanMaster.[Code]
+	
+	'	OUTER APPLY (
+	'		SELECT TOP 1 
+	'			TableReportNotes.[Date] As TRNDate
+	'			,TableReportNotes.[Description] As TRNDescription
+	'			,TableReportNotes.[Username] As TRNUsername
+	'		FROM 
+	'			[ReportNotes] AS TableReportNotes
+	'			LEFT JOIN [Master1] As TableVendorMaster 
+	'				ON TableReportNotes.[MasterCode] = TableVendorMaster.[Code] 
+	'		WHERE 
+	'			TableReportNotes.[MasterCode] = TableReceiptInTransaction.[MasterCode1]
+	'		Order By 
+	'			TableReportNotes.[Date] DESC) 
+	'		AS TableReportNotes 
+	
+	'WHERE 
+	'	TableReceiptInTransaction.[VchType] IN (14)
+	'	And TableReceiptInTransaction.[Date] >='11-01-2022' 
+	'	And TableReceiptInTransaction.[Date] <='11-13-2022'
+	'	And LTRIM(RTRIM(TableReceiptInTransaction.[VchNo]))  LIKE '%LKO-Rcpt-2905-Cash%'
+	'Order By 
+	'	TableReceiptInTransaction.[Date] ASC
+	'	,TableReceiptInTransaction.[VchCode] ASC
+	'	,TableReceiptInTransaction.[SrNo] Asc
+	'		Go
+	
+	
+	
+	'Select SQL Query
+	'NON Visible Fields
+	SelectQuery = "SELECT ISNULL(TableTransactionReferences.[RefCode],0) As TTRRefCode"				
+	
+	'Ref Vch Date	Date	CENTER	16	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableReferenceDetails.[Date],'') As TRDReferenceVoucherDate"
+	
+	'Ref Vch Date	Date	CENTER	16	---	No	
+	SelectQuery = SelectQuery & ",ISNULL(TableTransactionReferences.[DueDate],'') As TTRDueDate"	
+	
+	'Ref Vch No	Text	LEFT	16	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableReferenceDetails.[VchCode],0) As TRDVchCode"		
+	SelectQuery = SelectQuery & ",ISNULL(LTRIM(RTRIM(TableTransactionReferences.[No])),'') As TTRVchNo"		
+	
+	'Saleman Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableSalesmanMaster.[Code],'') As TSMSalesmanCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableSalesmanMaster.[Name],'') As TSMSalesVoucherBySalemanName"
+	
+	'Party Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableReceiptInTransaction.[MasterCode1] As TRINAccountCode"
+	SelectQuery = SelectQuery & ",TableAccountMaster.[Name] As TAMAccountName"	
+	
+	'Party Code	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMaster.[Alias] As TPMAlias"
+	
+	'Zone	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF2] As TAMAIZoneCode"
+	SelectQuery = SelectQuery & ",ISNull(TableZoneMaster.[Name],'') As TZMName"	
+	'Territory	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF3] As TAMAITerritoryCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableTerritoryMaster.[Name],'') As TTMName"
+	
+	'City	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF4] As TAMAICityCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableCityMaster.[Name],'') As TCMName"	
+	'Pincode	Text	CENTER	12	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[PINCode] As PinCode"
+	
+	'Party Contact	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[Contact] As TAMDIPartyContact"
+	
+	'Party WhatsAppNo	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[WhatsAppNo] As TAMDIWhatsAppNo"
+	
+	'Territory Manager	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableAccountMasterDetailedInfo.[OF5],'') As TAMAITerritoryManagerCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableTerritoryManagerMaster.[Name],'') As TTMMName"	
+	'Account Manager	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableAccountMasterDetailedInfo.[OF6],'') As TAMAIAccountManagerCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableAccountManagerMaster.[Name],'') As TAMMName"
+	'Type	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableAccountMasterDetailedInfo.[OF7],'') As TAMDIPartyTypeCode"
+	SelectQuery = SelectQuery & ",ISNULL(TablePartyTypeMaster.[Name],'') As TAMDIPartyTypeName"
+	'KYC Status	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableAccountMasterDetailedInfo.[OF8],'') As TAMDIPartyKYCStatusCode"
+	SelectQuery = SelectQuery & ",ISNULL(TablePartyKYCStatusMaster.[Name],'') As TAMDIPartyKYCStatusName"
+	'Amount Adjusted	Numeric	RIGHT	16	2	Yes
+	SelectQuery = SelectQuery & ",ISNULL(TableTransactionReferences.[Value1],'') As TRFAmountAdjusted"
+	'Due in Days	Numeric	CENTER	4	0	No
+	'SelectQuery = SelectQuery & ",ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TableTransactionReferences.[DueDate]),'') As DueInDays"
+	SelectQuery = SelectQuery & ",'' As DueInDays"	
+	'Number of Days in Adjustment	Numeric	CENTER	4	0	No
+	'SelectQuery = SelectQuery & ",ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TableReceiptInTransaction.[Date]),'') As NumberOfDaysInAdjustment"
+	SelectQuery = SelectQuery & ",'' As NumberOfDaysInAdjustment"	
+	'Due Days Minus Adjustment Days	Numeric	CENTER	4	0	No
+	'SelectQuery = SelectQuery & ",(ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TableTransactionReferences.[DueDate]),'') - ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TableReceiptInTransaction.[Date]),'')) As DueDaysMinusAdjustmentDays"
+	SelectQuery = SelectQuery & ",'' As DueDaysMinusAdjustmentDays"
+	'Transaction Amount	Numeric	RIGHT	16	2	No
+	SelectQuery = SelectQuery & ",TableReceiptInTransaction.[Value1] As TRITTransactionAmount"
+	'Collection Agent Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableCollectionAgentMaster.[Name],'') As TCAMCollectionAgentName"
+	'Funds Received By	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableFundsReceivedBy.[Name],'') As TFRBFundsReceivedBy"
+	'Funds Receipt Mode	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableFundsReceiptMode.[Name],'') As TFRMFundsReceiptMode"
+	'Short Narration	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableReceiptInTransaction.[ShortNar] As ShortNarration"
+	
+	SelectQuery = SelectQuery & ",TableReceiptInTransaction.[VchCode] As TRITVchCode"
+	SelectQuery = SelectQuery & ",TableReceiptInTransaction.[SrNo] As TRITSrNo"
+	'Receipt Date	Date	CENTER	16	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableReceiptInTransaction.[Date],'') As TRITReceiptDate"
+	'Receipt VchNo	Text	CENTER	16	---	No
+	SelectQuery = SelectQuery & ",LTRIM(RTRIM(TableReceiptInTransaction.[VchNo])) As TRITReceiptVchNo"
+	'Reference Method	Numeric	CENTER	1	0	No
+	SelectQuery = SelectQuery & ",ISNULL(TableTransactionReferences.[Method],0) As TTFReferenceMethod"
+	'Last Remarks By Party Date	Date	CENTER	16	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableReportNotes.TRNDate,'') As LastRemarksByPartyDate"
+	'Last Remarks By Party Description	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableReportNotes.[TRNDescription],'') As LastRemarksByPartyDescription"
+	'Last Remarks By Party Reported By	Text	LEFT	20	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableReportNotes.TRNUsername,'') As LastRemarksByPartyReportedBy"
+	'Salesman Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableSalesmanMaster.[Name],'') As TSMSalesVoucherBySalemanName"
+	'Salesman Commission	Numeric	RIGHT	16	2	Yes
+	SelectQuery = SelectQuery & ", ''  As SalemanComission /*(ISNULL(TableTransactionReferences.[Value1],0)*0.001) As SalemanComission*/"
+	'Collection Agent Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableCollectionAgentMaster.[Name],'') As TCAMCollectionAgentName"
+	'Collection Agent Commission	Numeric	RIGHT	16	2	Yes
+	SelectQuery = SelectQuery & ",'' AS CollectionAgentComissoin /*(ISNULL(TableTransactionReferences.[Value1],0)*0.002) As CollectionAgentComissoin*/"
+	
+	'SELECT From (The Start table)
+	SelectQuery = SelectQuery & " FROM [Tran2] As TableReceiptInTransaction "
+	
+	SelectQuery = SelectQuery & "LEFT JOIN [VchOtherInfo] As TableReceiptVoucherOtherInfo ON TableReceiptInTransaction.[VchCode] = TableReceiptVoucherOtherInfo.[VchCode] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableAccountMaster ON TableReceiptInTransaction.[MasterCode1] = TableAccountMaster.[Code] "
+	SelectQuery = SelectQuery & "LEFT JOIN [MasterAddressInfo] As TableAccountMasterDetailedInfo ON TableReceiptInTransaction.[MasterCode1] = TableAccountMasterDetailedInfo.[MasterCode] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableZoneMaster ON TableZoneMaster.[Code] = TableAccountMasterDetailedInfo.[OF2] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableTerritoryMaster ON TableTerritoryMaster.[Code] = TableAccountMasterDetailedInfo.[OF3] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableCityMaster ON TableCityMaster.[Code] = TableAccountMasterDetailedInfo.[OF4] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableTerritoryManagerMaster ON TableTerritoryManagerMaster.[Code] = TableAccountMasterDetailedInfo.[OF5] "				
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableAccountManagerMaster ON TableAccountManagerMaster.[Code] = TableAccountMasterDetailedInfo.[OF6] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TablePartyTypeMaster ON TablePartyTypeMaster.[Code] = TableAccountMasterDetailedInfo.[OF7] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TablePartyKYCStatusMaster ON TablePartyKYCStatusMaster.[Code] = TableAccountMasterDetailedInfo.[OF8] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableFundsReceivedBy ON TableFundsReceivedBy.[Code] = TableReceiptVoucherOtherInfo.[OF1] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableFundsReceiptMode ON TableFundsReceiptMode.[Code] = TableReceiptVoucherOtherInfo.[OF2] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableCollectionAgentMaster ON TableReceiptInTransaction.[CM6] = TableCollectionAgentMaster.[Code] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Tran3] As TableTransactionReferences ON TableReceiptInTransaction.[VchCode] = TableTransactionReferences.[VchCode] "
+	SelectQuery = SelectQuery & "AND TableReceiptInTransaction.[MasterCode1] = TableTransactionReferences.[MasterCode1] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Tran1] As TableReferenceDetails ON TableReceiptInTransaction.[MasterCode1] = TableReferenceDetails.[MasterCode1] "
+	SelectQuery = SelectQuery & "AND TableTransactionReferences.[No] = TableReferenceDetails.[VchNo] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableSalesmanMaster ON TableReferenceDetails.[CM4] = TableSalesmanMaster.[Code] "
+	SelectQuery = SelectQuery & "OUTER APPLY ( "
+	SelectQuery = SelectQuery & "SELECT TOP 1 "
+	SelectQuery = SelectQuery & "TableReportNotes.[Date] As TRNDate "
+	SelectQuery = SelectQuery & ",TableReportNotes.[Description] As TRNDescription "
+	SelectQuery = SelectQuery & ",TableReportNotes.[Username] As TRNUsername "	
+	SelectQuery = SelectQuery & "FROM "	
+	SelectQuery = SelectQuery & "[ReportNotes] AS TableReportNotes "	
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableVendorMaster "	
+	SelectQuery = SelectQuery & "ON TableReportNotes.[MasterCode] = TableVendorMaster.[Code] "	
+	SelectQuery = SelectQuery & "WHERE "	
+	SelectQuery = SelectQuery & "TableReportNotes.[MasterCode] = TableReceiptInTransaction.[MasterCode1] "	
+	SelectQuery = SelectQuery & "Order By "								
+	SelectQuery = SelectQuery & "TableReportNotes.[Date] DESC) "									
+	SelectQuery = SelectQuery & "AS TableReportNotes "		
+	SelectQuery = SelectQuery & " "	
+	SelectQuery = SelectQuery & " "			
+	'WHERE Clause
+	SelectQuery = SelectQuery & "WHERE "
+	SelectQuery = SelectQuery & "TableReceiptInTransaction.[VchType] IN (14,16) "	
+	
+	'Selected Date Parameter'	
+	SelectQuery = SelectQuery & _
+	"And TableReceiptInTransaction.[Date] >=" & BusyLib.GetDateQryStr(BusyRepOpt.OptStartDate) & " And TableReceiptInTransaction.[Date] <=" & BusyLib.GetDateQryStr(BusyRepOpt.OptEndDate) &" "
+	
+	'Selected Account Masters Code - Added in WHERE Clause
+	If (varAccountMasterCodes <> "" And varAccountMasterSelectionType = 1) Then
+		SelectQuery = SelectQuery & _
+		"And TableReceiptInTransaction.[MasterCode1] IN ("&varAccountMasterCodes&") "
+	End If
+	'Selected Account Master Group Code
+	If (varAccountMasterParentGroupCode <> ""  And varAccountMasterSelectionType = 2)Then
+		SelectQuery = SelectQuery & _
+		"And TableAccountMaster.[ParentGrp] IN ("&varAccountMasterParentGroupCode&") "
+	End If
+	'Selected Account Masters Codes
+	If (varAccountMasterCodes <> "" And varAccountMasterSelectionType = 4) Then
+		SelectQuery = SelectQuery & _
+		"And TableReceiptInTransaction.[MasterCode1] IN ("&varAccountMasterCodes&") "
+	End If
+	
+	'Selected Salesmans Code - Added in WHERE Clause
+	If (varSalesmanCodes <> "" And varSalesmanSelectionType = 1) Then
+		SelectQuery = SelectQuery & _
+		"And TableReferenceDetails.[CM4] IN ("&varSalesmanCodes&") "
+	End If
+	'Selected Salesman Group Code
+	If (varSalesmanParentGroupCode <> ""  And varSalesmanSelectionType = 2)Then
+		SelectQuery = SelectQuery & _
+		"And TableSalesmanMaster.[ParentGrp] IN ("&varSalesmanParentGroupCode&") "
+	End If
+	'Selected Salesmans Codes
+	If (varSalesmanCodes <> "" And varSalesmanSelectionType = 4) Then
+		SelectQuery = SelectQuery & _
+		"And TableReferenceDetails.[CM4] IN ("&varSalesmanCodes&") "
+	End If
+	
+	'Collection Agent Name Text To Search
+	If varCollectionAgentNameToSearch <> "" And Len(varCollectionAgentNameToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TableCollectionAgentMaster.[Name] LIKE '"&varCollectionAgentNameToSearch&"' "
+	End If
+	
+	'Part Name Text To Search
+	If varPartyNameTextToSearch <> "" And Len(varPartyNameTextToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TableAccountMaster.[Name] LIKE '"&varPartyNameTextToSearch&"' "
+	End If
+	'Ignore Part Name Text To Search
+	If varIgnorePartyNameTextToSearch <> "" And Len(varIgnorePartyNameTextToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TableAccountMaster.[Name] NOT LIKE '"&varIgnorePartyNameTextToSearch&"' "
+	End If
+	
+	
+	'Order By
+	SelectQuery = SelectQuery & " Order By TableReceiptInTransaction.[Date] ASC,TableReceiptInTransaction.[VchCode] ASC,TableReceiptInTransaction.[SrNo] Asc"
+	
+	'MsgBox(SelectQuery)
+	'WriteInEventLog SelectQuery,CTBCRScriptLogFileName
+	'Exit Sub
+	Set RecordSet= BusyLib.GetRecordset(SelectQuery)
+	'MsgBox("Records from DB - " & RecordSet.RecordCount)
+	'Exit Sub
+	With RecordSet
+		If .RecordCount>0 Then
+			.MoveLast
+			.MoveFirst
+			
+			Grid_Total_Rows .RecordCount
+			
+			Do While Not .EOF
+				If m_QuitRep=True Then Exit Sub
+				
+				varAssumed10GPofAdjustmentAmountforCommission = 0
+				varSalesmanCommissionPercentageBasedonDays = 0
+				varSalesmanCommission = 0
+				varCollectionAgentCommissionPercentageBasedonDays = 0
+				varCollectionAgentCommission = 0
+				
+				
+				'				Grid_New_Entry 
+				'Party Name	Text	LEFT	40	---	No
+				'Last Remarks By Party Date	Date	CENTER	16	---	No
+				'Last Remarks By Party Description	Text	LEFT	40	---	No
+				'Last Remarks By Party Reported By	Text	LEFT	20	---	No
+				'Party Code	Text	LEFT	40	---	No
+				'Zone	Text	LEFT	40	---	No
+				'Territory	Text	LEFT	40	---	No
+				'City	Text	LEFT	40	---	No
+				'Pincode	Text	CENTER	12	---	No
+				'Party Contact	Text	LEFT	40	---	No
+				'Party WhatsAppNo	Text	LEFT	40	---	No
+				'Territory Manager	Text	LEFT	40	---	No
+				'Account Manager	Text	LEFT	40	---	No
+				'Type	Text	LEFT	40	---	No
+				'KYC Status	Text	LEFT	40	---	No
+				'Party Name	Text	LEFT	40	---	No
+				'Ref Vch No	Text	LEFT	16	---	No
+				'Ref Vch Date	Date	CENTER	16	---	No
+				'Ref Vch Due Date	Date	CENTER	16	---	No
+				'Saleman Name	Text	LEFT	40	---	No
+				'Amount Adjusted	Numeric	RIGHT	16	2	Yes
+				'Due in Days	Numeric	CENTER	4	0	No
+				'Number of Days in Adjustment	Numeric	CENTER	4	0	No
+				'Due Days Minus Adjustment Days	Numeric	CENTER	4	0	No
+				'Transaction Amount	Numeric	RIGHT	16	2	Yes
+				'Collection Agent Name	Text	LEFT	40	---	No
+				'Receipt Date	Date	CENTER	16	---	No
+				'Funds Received By	Text	LEFT	40	---	No
+				'Funds Receipt Mode	Text	LEFT	40	---	No
+				'Short Narration	Text	LEFT	40	---	No
+				'Receipt VchNo	Text	CENTER	16	---	No
+				'Reference Method	Numeric	CENTER	1	0	No
+				'Assumed 10% GP of Adjustment Amount for Commission	Numeric	RIGHT	8	2	No
+				'Salesman Name	Text	LEFT	40	---	No
+				'Commission @ % Based on Days	Numeric	RIGHT	4	2	No
+				'Salesman Commission	Numeric	RIGHT	16	2	Yes
+				'Collection Agent Name	Text	LEFT	40	---	No
+				'Commission @ % Based on Days	Numeric	RIGHT	4	2	No
+				'Collection Agent Commission	Numeric	RIGHT	16	2	Yes				
+				
+				'Update the NON Visible Fields Data
+				'Voucher Code
+				varTTFReferenceMethod = .Fields("TTFReferenceMethod").Value
+				
+				'Party Name	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMAccountName").Value
+				
+				'Last Remarks By Party Date	Date	CENTER	16	---	No
+				Grid_Throw_Data  .Fields("LastRemarksByPartyDate").Value
+				
+				'Last Remarks By Party Description	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("LastRemarksByPartyDescription").Value
+				
+				'Last Remarks By Party Reported By	Text	LEFT	20	---	No
+				Grid_Throw_Data  .Fields("LastRemarksByPartyReportedBy").Value
+				
+				'Party Code	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TPMAlias").Value
+				
+				'Zone	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TZMName").Value
+				
+				'Territory	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TTMName").Value
+				
+				'City	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TCMName").Value
+				
+				'Pincode	Text	CENTER	12	---	No
+				Grid_Throw_Data  .Fields("PINCode").Value
+				
+				'Party Contact	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMDIPartyContact").Value
+				
+				'Party WhatsAppNo	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMDIWhatsAppNo").Value
+				
+				'Territory Manager	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TTMMName").Value
+				
+				'Account Manager	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMMName").Value
+				
+				'Type	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMDIPartyTypeName").Value
+				
+				'KYC Status	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMDIPartyKYCStatusName").Value
+				
+				'Party Name	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMAccountName").Value
+				
+				'Ref Vch No	Text	LEFT	16	---	No
+				Grid_Throw_Data  .Fields("TTRVchNo").Value				
+				
+				'Ref Vch Date	Date	CENTER	16	---	No
+				Grid_Throw_Data .Fields("TRDReferenceVoucherDate").Value
+				
+				'Ref Vch Due Date	Date	CENTER	16	---	No
+				Grid_Throw_Data .Fields("TTRDueDate").Value
+				
+				'Saleman Name	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TSMSalesVoucherBySalemanName").Value
+				
+				'Amount Adjusted	Numeric	RIGHT	16	2	Yes
+				varAmountAdjusted = .Fields("TRFAmountAdjusted").Value
+				If varAmountAdjusted > 0 Then
+					Grid_Throw_Data  .Fields("TRFAmountAdjusted").Value
+				Else 
+					Grid_Throw_Data  ""
+				End If
+				
+				'Due in Days	Numeric	CENTER	4	0	No
+				'WriteInEventLog .Fields("TRDReferenceVoucherDate").Value & " : " & .Fields("TTRDueDate").Value ,CTBCRScriptLogFileName
+				If (varTTFReferenceMethod <> 0 And .Fields("TRDReferenceVoucherDate").Value <> "1/1/1900" And .Fields("TTRDueDate").Value <> "1/1/1900" ) Then
+					varDueinDays = DateDiff("d",.Fields("TRDReferenceVoucherDate").Value,.Fields("TTRDueDate").Value)
+					Grid_Throw_Data  varDueinDays
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				
+				'Number of Days in Adjustment	Numeric	CENTER	4	0	No
+				If (varTTFReferenceMethod <> 0 And .Fields("TRDReferenceVoucherDate").Value <> "1/1/1900"  And .Fields("TRITReceiptDate").Value <> "1/1/1900") Then
+					varNumberofDaysinAdjustment = DateDiff("d",.Fields("TRDReferenceVoucherDate").Value,.Fields("TRITReceiptDate").Value)
+					Grid_Throw_Data  varNumberofDaysinAdjustment
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Due Days Minus Adjustment Days	Numeric	CENTER	4	0	No
+				If (varTTFReferenceMethod <> 0 And .Fields("TTRDueDate").Value <> "1/1/1900" And .Fields("TRITReceiptDate").Value <> "1/1/1900") Then
+					varDueDaysMinusAdjustmentDays = DateDiff("d",.Fields("TTRDueDate").Value,.Fields("TRITReceiptDate").Value)
+					Grid_Throw_Data varDueDaysMinusAdjustmentDays
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Transaction Amount	Numeric	RIGHT	16	2	No
+				varTransactionAmount = .Fields("TRITTransactionAmount").Value
+				If varTransactionAmount < 0 Then
+					Grid_Throw_Data  .Fields("TRITTransactionAmount").Value
+				Else
+					Grid_Throw_Data  ""
+				End If
+				
+				'Collection Agent Name	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TCAMCollectionAgentName").Value
+				
+				'Receipt Date	Date	CENTER	16	---	No
+				Grid_Throw_Data  .Fields("TRITReceiptDate").Value
+				
+				'Funds Received By	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TFRBFundsReceivedBy").Value
+				
+				'Funds Receipt Mode	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TFRMFundsReceiptMode").Value
+				
+				'Short Narration	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("ShortNarration").Value
+				
+				'Receipt VchNo	Text	CENTER	16	---	No
+				Grid_Throw_Data  .Fields("TRITReceiptVchNo").Value
+				
+				'Reference Method	Numeric	CENTER	1	0	No
+				Grid_Throw_Data  .Fields("TTFReferenceMethod").Value
+				
+				If varNumberofDaysinAdjustment => 0 And varNumberofDaysinAdjustment < 11 Then
+					varSalesmanCommissionPercentageBasedonDays = CTSalesmanComission0To10Days
+					varSalesmanCommission = (varAmountAdjusted * CTSalesmanComission0To10Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varNumberofDaysinAdjustment => 11 And varNumberofDaysinAdjustment < 21 Then
+					varSalesmanCommissionPercentageBasedonDays = CTSalesmanComission11To20Days
+					varSalesmanCommission = (varAmountAdjusted * CTSalesmanComission11To20Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varNumberofDaysinAdjustment => 21 And varNumberofDaysinAdjustment < 31 Then
+					varSalesmanCommissionPercentageBasedonDays = CTSalesmanComission21To30Days
+					varSalesmanCommission = (varAmountAdjusted * CTSalesmanComission21To30Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varNumberofDaysinAdjustment => 31 And varNumberofDaysinAdjustment < 61 Then
+					varSalesmanCommissionPercentageBasedonDays = CTSalesmanComission31To60Days					
+					varSalesmanCommission = (varAmountAdjusted * CTSalesmanComission31To60Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varNumberofDaysinAdjustment => 61 Then
+					varSalesmanCommissionPercentageBasedonDays = CTSalesmanComissionAbove60Days				
+					varSalesmanCommission = (varAmountAdjusted * CTSalesmanComissionAbove60Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				Else
+					varSalesmanCommission = ""
+				End If
+				
+				If varNumberofDaysinAdjustment => 0 And varNumberofDaysinAdjustment < 11 Then
+					varCollectionAgentCommissionPercentageBasedonDays = CTCollectionAgentComission0To10Days
+					varCollectionAgentCommission = (varAmountAdjusted * CTCollectionAgentComission0To10Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varNumberofDaysinAdjustment => 11 And varNumberofDaysinAdjustment < 21 Then
+					varCollectionAgentCommissionPercentageBasedonDays = CTCollectionAgentComission11To20Days
+					varCollectionAgentCommission = (varAmountAdjusted * CTCollectionAgentComission11To20Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varNumberofDaysinAdjustment => 21 And varNumberofDaysinAdjustment < 31 Then
+					varCollectionAgentCommissionPercentageBasedonDays = CTCollectionAgentComission21To30Days
+					varCollectionAgentCommission = (varAmountAdjusted * CTCollectionAgentComission21To30Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varNumberofDaysinAdjustment => 31 And varNumberofDaysinAdjustment < 61 Then
+					varCollectionAgentCommissionPercentageBasedonDays = CTCollectionAgentComission31To60Days					
+					varCollectionAgentCommission = (varAmountAdjusted * CTCollectionAgentComission31To60Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varNumberofDaysinAdjustment => 61 Then
+					varCollectionAgentCommissionPercentageBasedonDays = CTCollectionAgentComissionAbove60Days				
+					varCollectionAgentCommission = (varAmountAdjusted * CTCollectionAgentComissionAbove60Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				Else
+					varCollectionAgentCommission = ""
+				End If
+				
+				
+				If varTTFReferenceMethod <> 0 Then	
+					
+					'Number of Days in Adjustment	Numeric	CENTER	4	0	No
+					Grid_Throw_Data varNumberofDaysinAdjustment
+					
+					'Assumed 10% GP of Adjustment Amount for Commission	Numeric	RIGHT	8	2	No
+					varAssumed10GPofAdjustmentAmountforCommission = varAmountAdjusted * CTAssumed10GPofAdjustmentAmountforCommission
+					Grid_Throw_Data varAssumed10GPofAdjustmentAmountforCommission
+					
+					If .Fields("TSMSalesVoucherBySalemanName").Value <> "" Then
+						'Salesman Name	Text	LEFT	40	---	No
+						Grid_Throw_Data  .Fields("TSMSalesVoucherBySalemanName").Value
+						
+	
+					Else
+						Grid_Throw_Data	""
+				
+					End If
+						'Commission @ % Based on Days	Numeric	RIGHT	4	2	No
+						Grid_Throw_Data (varSalesmanCommissionPercentageBasedonDays * 100) & "%"
+						
+						'Salesman Commission	Numeric	RIGHT	16	2	Yes
+						Grid_Throw_Data	varSalesmanCommission						
+					
+					If .Fields("TCAMCollectionAgentName").Value <> "" Then 
+						'Collection Agent Name	Text	LEFT	40	---	No
+						Grid_Throw_Data  .Fields("TCAMCollectionAgentName").Value
+						
+
+					Else
+						Grid_Throw_Data	""			
+						
+					End If
+						'Commission @ % Based on Days	Numeric	RIGHT	4	2	No
+						Grid_Throw_Data  (varCollectionAgentCommissionPercentageBasedonDays * 100) & "%"
+						
+						'Collection Agent Commission	Numeric	RIGHT	16	2	Yes	
+						Grid_Throw_Data  varCollectionAgentCommission							
+				Else
+					Grid_Throw_Data ""
+					Grid_Throw_Data ""
+					Grid_Throw_Data ""					
+					Grid_Throw_Data ""
+					Grid_Throw_Data ""					
+					Grid_Throw_Data ""
+					Grid_Throw_Data ""					
+					
+				End If
+				
+				
+				
+				Grid_Next_Row .Fields("TRDVchCode").Value&"-"&.Fields("TRINAccountCode").Value&"-"&.Fields("TRITVchCode").Value
+				.MoveNext
+			Loop
+		End If
+	End With
+	
+	
+End Sub
+
+
+Public Sub OnEnterChs(p_OnEnterInfo)
+	Dim varOptionToOpen	
+	Dim varVoucherCodes
+	Dim varSalesVoucherCode
+	Dim varAccountMasterCode
+	Dim varReceiptVoucherCode
+
+	dtmThisDay = Day(Date)
+	dtmThisMonth = Month(Date)
+	dtmThisYear = Year(Date)
+	
+	varVoucherCodes = Split(p_OnEnterInfo,"-")
+	varSalesVoucherCode = varVoucherCodes(0)
+	varAccountMasterCode = varVoucherCodes(1)
+	varReceiptVoucherCode = varVoucherCodes(2)	
+	varOptionToOpen =  BusyLib.GetOption3( "Choose Option","Sales Voucher","Account Ledger","Receipt Voucher Ledger","More details in")
+	If varOptionToOpen = 1 And varSalesVoucherCode<>"" Then
+		OnEnter_Modify_Voucher varSalesVoucherCode
+	ElseIf varOptionToOpen = 2	 And varAccountMasterCode <> "" Then
+		OnEnter_Acc_Ledger varAccountMasterCode,DateAdd("m",-3,Date),Date	
+	ElseIf varOptionToOpen = 3 And varReceiptVoucherCode <> "" Then
+		OnEnter_Modify_Voucher varReceiptVoucherCode
+	End If	
+End Sub
+
+
+Public Sub UpdateFieldsInfo()
+	BusyGrid.AddTopLabel1 "Receipts From: "&Day(BusyRepOpt.OptStartDate)&"-"&Month(BusyRepOpt.OptStartDate)&"-"&Year(BusyRepOpt.OptStartDate)&" To:"&Day(BusyRepOpt.OptEndDate)&"-"&Month(BusyRepOpt.OptEndDate)&"-"&Year(BusyRepOpt.OptEndDate)
+	BusyGrid.AddTopLabel2  CTBCRByPrachaitVersion
+	BusyGrid.AddInfoLabel1 CTBCRResponsbilePersonForReport
+	BusyGrid.AddInfoLabel2 CTBCRByDevelopedPrachaitContactInformation
+	BusyGrid.AddInfoLabel3 CTBCRTodo
+	BusyGrid.AddInfoLabel4 "Status : ... Keep working !"
+End Sub
+
+
+Public Sub UpdateObjects(CEvents)
+	Set BusyLib = CreateObject("Busy2L21.CFixedInterface")
+	Set BusyConst = CreateObject("BusyCSC21.CGlobalConstants")
+	Set BusyRepOpt = CreateObject("Busy2L21.CRepOptions")
+	Set BusyCompConfig = CreateObject("Busy2L21.CCompany")
+	
+	Set BusyGrid = CEvents
+	Set BusyOnEnter = CEvents
+	
+	BusyUpdateRepOpt BusyRepOpt
+	BusyUpdateCompConfig BusyCompConfig
+End Sub
+
+
+Public Sub QuitRep(p_QuitVal)
+	m_QuitRep = p_QuitVal
+End Sub
+
+
+Public Sub Grid_Throw_Data(p_Data)
+	BusyGrid.ThrowData p_Data
+End Sub
+
+
+Public Sub Grid_Next_Row(p_OnEnterInfo)
+	BusyGrid.NextRow p_OnEnterInfo
+End Sub
+
+
+Public Sub Grid_Next_Row_With_Special_Effect(p_OnEnterInfo,p_SEConst)
+	BusyGrid.NextRow p_OnEnterInfo, p_SEConst
+End Sub
+
+
+Public Sub Grid_New_Entry()
+	BusyGrid.NewEntry
+End Sub
+
+
+Public Sub Grid_Total_Rows(p_TotalRows)
+	BusyGrid.TotalRows p_TotalRows
+End Sub
+
+
+Public Sub BusyUpdateCompConfig(p_Obj)
+	BusyGrid.UpdateCompConfig p_Obj
+End Sub
+
+
+Public Sub BusyUpdateRepOpt(p_Obj)
+	BusyGrid.UpdateRepOpt p_Obj
+End Sub
+
+
+Public Sub UpdateFormLabels()
+	
+End Sub
+
+
+Public Sub AddTopLabel1(p_Label)
+	BusyGrid.AddTopLabel1 p_Label 
+End Sub 
+
+
+Public Sub AddTopLabel2(p_Label)
+	BusyGrid.AddTopLabel2 p_Label 
+End Sub 
+
+
+Public Sub AddInfoLabel1(p_Label)
+	BusyGrid.AddInfoLabel1 p_Label 
+End Sub 
+
+
+Public Sub AddInfoLabel2(p_Label)
+	BusyGrid.AddInfoLabel2 p_Label 
+End Sub 
+
+
+Public Sub AddInfoLabel3(p_Label)
+	BusyGrid.AddInfoLabel3 p_Label 
+End Sub 
+
+
+Public Sub AddInfoLabel4(p_Label)
+	BusyGrid.AddInfoLabel4 p_Label 
+End Sub 
+
+
+Public Sub BusySetRepOpt(p_Obj)
+	BusyGrid.SetRepOpt p_Obj
+End Sub
+
+
+Public Sub BusyAddNewColumn(p_ColumnName, p_ColumnDataType, p_ColumnAlignment, p_ColumnMaxChar, p_ColumnMaxDecimal, p_ColumnShowTotal)
+	BusyGrid.AddNewColumn p_ColumnName, p_ColumnDataType, p_ColumnAlignment, p_ColumnMaxChar, p_ColumnMaxDecimal, p_ColumnShowTotal
+End Sub
+
+
+Public Sub OnEnter_Modify_Master(p_MasterType, p_MasterCode)
+	BusyOnEnter.ModifyMaster p_MasterType,p_MasterCode
+End Sub
+
+
+Public Sub OnEnter_Modify_Voucher(p_VchCode)
+	BusyOnEnter.ModifyVoucher p_VchCode
+End Sub
+
+
+Public Sub OnEnter_Acc_Ledger(p_AccCode, p_StartDate, p_EndDate)
+	BusyOnEnter.ShowAccLedger p_AccCode, p_StartDate, p_EndDate 
+End Sub
+
+
+Public Sub OnEnter_Acc_Ledger_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowAccLedgerWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Item_Ledger(p_ItemCode, p_MCCode, p_StartDate, p_EndDate, p_ShowVal, p_IUT)
+	BusyOnEnter.ShowItemMCLedger p_ItemCode, p_MCCode, p_StartDate, p_EndDate, p_ShowVal, p_IUT
+End Sub
+
+
+Public Sub OnEnter_Item_Ledger_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowItemMCLedgerWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Vch_List(p_VchType, p_StartDate, p_EndDate, p_VchSeriesCode)
+	BusyOnEnter.ShowVchsList p_VchType, p_StartDate, p_EndDate, p_VchSeriesCode
+End Sub
+
+
+Public Sub OnEnter_Vch_List_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowVchsListWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Custom_Report(p_FormatName, p_RepOptObj)
+	BusyOnEnter.ShowCustomReport p_FormatName, p_RepOptObj
+End Sub
+
+Public Function WriteInEventLog(LogText,LogFileName)
+	On Error Resume Next	
+	dtmThisDay = Day(Date)
+	dtmThisMonth = Month(Date)
+	dtmThisYear = Year(Date)
+	dtmThisHour = Hour(Time)
+	dtmThisMinute = Minute(Time)
+	dtmThisSecond = Second(Time)
+	
+	If LogFileName = "" Then
+		LogFileName = CTBCRScriptLogFileName
+	End If 
+	Const ForAppending = 8
+	Set objFSO = CreateObject("Scripting.FileSystemObject")
+	
+	Set objTextFile = objFSO.OpenTextFile _
+	(LogFileName, ForAppending, True)
+	objTextFile.Write dtmThisYear&":"& dtmThisMonth&":"& dtmThisDay&" " & dtmThisHour&":"&dtmThisMinute&":"&dtmThisSecond& " - "  & LogText & vbCrLf
+	objTextFile.Close
+	WriteInEventLog = 1
+	'strBackupName = dtmThisYear & "_" & dtmThisMonth & "_" & dtmThisDay
+End Function

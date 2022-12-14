@@ -1,0 +1,1049 @@
+Option Explicit
+
+Const CTBCRByPrachaitVersion = "Busy Custom Report - BCR PS_04PymtNComm - Version PS20221214-1030"
+Const CTBCRByDevelopedPrachaitContactInformation = "Developed By Prachait Saxena, +919450901908, info@prachait.com"
+Const CTBCRScriptFileName = "PS_04PymtNComm.vbs"
+Const CTBCRScriptLogFileName = "PS_04PymtNComm.txt"
+'
+'
+'The Custom Report is to calculate the comission of Payment and Comission on Payment
+'
+'Current Filters in use
+'Account, Item, Material Center, Purchase Person, Date, Party Name, Ignore Party Name, Profit Percentage to Purchase Person, Ignore Purchase Price Reduction
+'
+'Todo:
+'1. Implementaion of filters
+'Voucher Group, Voucher Series
+'2. Implementtion of Ignore Internal Lapking Purchase Price
+'Change Log
+'
+
+Const CTBCRTodo = "Todo: Filter on min and max day"
+Const CTBCRResponsbilePersonForReport = "To be reported by Manu (Accounts) to management"
+
+
+Dim objFSO
+Dim objTextFile
+
+Dim BusyLib
+Dim BusyGrid
+Dim BusyOnEnter
+Dim BusyConst
+Dim BusyRepOpt
+Dim BusyCompConfig
+Dim m_QuitRep
+
+Dim varErrorLogFile
+Dim varErrorMessage
+Dim varErrorStatus
+
+Dim	dtmThisDay
+Dim	dtmThisMonth
+Dim	dtmThisYear
+Dim dtmThisHour
+Dim dtmThisMinute
+Dim dtmThisSecond
+
+
+'Ref Vch Date
+'Ref Vch No
+'Broker Name
+'Party Name
+'Party Code
+'Zone
+'Territory
+'City
+'PincodeText
+'Party Contact
+'Party WhatsAppNo
+'Territory Manager
+'Account Manager
+'Type
+'KYC Status
+'Amount Adjusted
+'Due in Days
+'Number of Days in Adjustment
+'Due Days Minus Adjustment Days
+'Transaction Amount
+'Payment Agent Name
+'Funds Paid By
+'Funds Payment Mode
+'Short Narration
+'Payment Date
+'Payment VchNo
+'Reference Method
+'Last Remarks By Party Date
+'Last Remarks By Party Description
+'Last Remarks By Party Reported By
+'Broker Name
+'Broker Commission
+'Payment Agent Name
+'Payment Agent Commission
+
+Const CTBrokerComission0To10Days = 0.03
+Const CTBrokerComission11To20Days = 0.02
+Const CTBrokerComission21To30Days = 0.01
+Const CTBrokerComission31To60Days = 0
+Const CTBrokerComissionAbove60Days = -0.07
+
+Const CTPaymentAgentComissionDueDaysPlus0To10Days = 0.05
+Const CTPaymentAgentComissionDueDaysPlus11To20Days = 0.025
+Const CTPaymentAgentComissionDueDaysPlus21To30Days = 0.00
+Const CTPaymentAgentComissionDueDaysPlusAbove30Days = -0.05
+
+Const CTAssumed10GPofAdjustmentAmountforCommission = 0.1
+
+Public Sub GenerateRep()
+	
+	On Error Resume Next	
+	
+	Dim SelectQuery
+	Dim RecordSet
+	Dim OldVchCode 
+	
+	Dim varTTFReferenceMethod
+	Dim varRefVchDate
+	Dim varRefVchNo
+	Dim varBrokerName
+	Dim varPartyName
+	Dim varPartyCode
+	Dim varZone
+	Dim varTerritory
+	Dim varCity
+	Dim varPincode
+	Dim varPartyContact
+	Dim varPartyWhatsAppNo
+	Dim varTerritoryManager
+	Dim varAccountManager
+	Dim varType
+	Dim varKYCStatus
+	Dim varAmountAdjusted
+	Dim varDueinDays
+	Dim varNumberofDaysinAdjustment
+	Dim varDueDaysMinusAdjustmentDays
+	Dim varTransactionAmount
+	Dim varPaymentAgentName
+	Dim varFundsPaidBy
+	Dim varFundsPaymentMode
+	Dim varShortNarration
+	Dim varPaymentDate
+	Dim varPaymentVchNo
+	Dim varReferenceMethod
+	Dim varLastRemarksByPartyDate
+	Dim varLastRemarksByPartyDescription
+	Dim varLastRemarksByPartyReportedBy
+	Dim varAssumed10GPofAdjustmentAmountforCommission				
+	Dim	varBrokerCommissionPercentageBasedonDays
+	Dim varBrokerCommission
+	Dim	varPaymentAgentCommissionPercentageBasedonDays	
+	Dim varPaymentAgentCommission
+	
+	Dim varVoucherType
+	Dim varVoucherCode
+	
+	OldVchCode=0
+	
+	Dim varCounter
+	
+	'Setup Filters from the Report Options
+	'START_DATE	Starting Payment Date
+	'END_DATE	Ending Payment Date
+	'ACCOUNT_RANGE	Select Account Master Range
+	'BROKER_RANGE	Broker Name
+	'TEXT1	Payment Agent (Ex. %Sarvesh%)
+	'TEXT2	Party Name (Use % Example %Prachait%)
+	'TEXT3	Ignore Party Name(s) (Ex. %Lapking%)
+	'TEXT4	Min Number of Days in Adjustment
+	'TEXT5	Max Number of Days in Adjustment	
+	
+	'Filter For Account Master
+	'Variables Used in BusyReportOptions
+	Dim varAccountMasterSelectionType
+	Dim varAccountMasterCodes
+	Dim varAccountMasterParentGroupCode
+	Dim varAccountMasterSelected
+	Dim varAccountMasterSelectedCodes
+	
+	'WriteInEventLog "Account Master Range "&BusyRepOpt.OptAccRange,CTBCRScriptLogFileName
+	varAccountMasterSelectionType = BusyRepOpt.OptAccRange
+	If BusyRepOpt.OptAccRange = 1  Then	'One Account Selected
+		varAccountMasterCodes = BusyRepOpt.OptAccCode
+		'WriteInEventLog "OptAccCode "&BusyRepOpt.OptAccCode,CTBCRScriptLogFileName 'For Single Selection Only
+	ElseIf BusyRepOpt.OptAccRange = 2  Then	'Account Group Selected
+		varAccountMasterParentGroupCode = BusyRepOpt.OptAGRPCode
+		'WriteInEventLog "OptAGRPCode "&BusyRepOpt.OptAGRPCode,CTBCRScriptLogFileName			
+	ElseIf BusyRepOpt.OptAccRange = 3  Then	'All Accounts
+		
+	ElseIf BusyRepOpt.OptAccRange = 4  Then	'Selected Accounts	
+		Set varAccountMasterSelectedCodes = BusyRepOpt.OptAccRangeSelectedCol
+		If varAccountMasterSelectedCodes.Count > 0 Then
+			For varCounter = 1 To varAccountMasterSelectedCodes.Count
+				varAccountMasterCodes =  varAccountMasterCodes & BusyLib.GetItemFromCol(varAccountMasterSelectedCodes, varCounter) & "," 
+			Next 
+		End If 
+		varAccountMasterCodes =  Left(varAccountMasterCodes,Len(varAccountMasterCodes)-1)  
+		If Len(varAccountMasterCodes)=0 Then varAccountMasterCodes="" 
+		varCounter = 0
+		'WriteInEventLog "varAccountMasterCodes "&varAccountMasterCodes,CTBCRScriptLogFileName 'For Single Selection Only
+	End If
+	
+	'Filter For Broker
+	Dim varBrokerSelectionType
+	Dim varBrokerCodes
+	Dim varBrokerParentGroupCode
+	Dim varBrokerSelected
+	Dim varBrokerSelectedCodes
+	
+	'WriteInEventLog "Broker Range "&BusyRepOpt.OptBrokerRange,CTBCRScriptLogFileName
+	varBrokerSelectionType = BusyRepOpt.OptBrokerRange
+	If BusyRepOpt.OptBrokerRange = 1  Then	'One Item Selected
+		varBrokerCodes = BusyRepOpt.OptBrokerCode
+		'WriteInEventLog "OptBrokerCode "&BusyRepOpt.OptBrokerCode,CTBCRScriptLogFileName 'For Single Selection Only
+	ElseIf BusyRepOpt.OptBrokerRange = 2  Then	'Item Group Selected
+		'varBrokerParentGroupCode = BusyRepOpt.OptIGrpCode
+		'WriteInEventLog "OptAGRPCode "&BusyRepOpt.OptIGrpCode,CTBCRScriptLogFileName			
+	ElseIf BusyRepOpt.OptBrokerRange = 3  Then	'All Items
+		
+	ElseIf BusyRepOpt.OptBrokerRange = 4  Then	'Selected Items	
+		Set varBrokerSelectedCodes = BusyRepOpt.OptBrokerRangeSelectedCol
+		If varBrokerSelectedCodes.Count > 0 Then
+			For varCounter = 1 To varBrokerSelectedCodes.Count
+				varBrokerCodes =  varBrokerCodes & BusyLib.GetItemFromCol(varBrokerSelectedCodes, varCounter) & "," 
+			Next 
+		End If 
+		varBrokerCodes =  Left(varBrokerCodes,Len(varBrokerCodes)-1)  
+		If Len(varBrokerCodes)=0 Then varBrokerCodes="" 
+		varCounter = 0
+		'WriteInEventLog "varBrokerCodes "&varBrokerCodes,CTBCRScriptLogFileName 'For Single Selection Only
+	End If
+	
+	'Payment Agent
+	'TEXT1	Payment Agent (Ex. %Sarvesh%)	
+	Dim varPaymentAgentNameToSearch
+	varPaymentAgentNameToSearch = BusyRepOpt.OptText1
+	
+	'Filter Party Name with Text
+	'TEXT2	Party Name (Use % Example %Prachait%)
+	Dim varPartyNameTextToSearch
+	varPartyNameTextToSearch = BusyRepOpt.OptText2
+	
+	'Filter Ignore Party Name with Text
+	'TEXT3	Ignore Party Name(s) (Ex. %Lapking%)	
+	Dim varIgnorePartyNameTextToSearch
+	varIgnorePartyNameTextToSearch = BusyRepOpt.OptText3
+	
+	
+	'TEXT4	Min Number of Days in Adjustment
+	Dim varMinNumberofDaysinAdjustment
+	varMinNumberofDaysinAdjustment = BusyRepOpt.OptText4
+	
+	'TEXT5	Max Number of Days in Adjustment	
+	Dim varMaxNumberofDaysinAdjustment
+	varMaxNumberofDaysinAdjustment = BusyRepOpt.OptText5
+	
+	
+	'/****** Script for SelectTopNRows command from SSMS  ******/
+	'SELECT
+	'	ISNULL(TableTransactionReferences.[RefCode],0) As TTRRefCode
+	'	,ISNULL(TableReferenceDetails.[Date],'') As TRDReferenceVoucherDate
+	'	,ISNULL(TableTransactionReferences.[DueDate],'') As TTRDueDate
+	'	,ISNULL(LTRIM(RTRIM(TableTransactionReferences.[No])),'') As TTRVchNo
+	'	,ISNULL(TableBrokerMaster.[Name],'') As TSMPurchaseVoucherByBrokerName
+	'	,TablePaymentInTransaction.[MasterCode1] As TRINPartyCode
+	'	,TableAccountMaster.[Name] As TAMAccountName
+	'	,TableAccountMaster.[Alias] As TPMAlias
+	'	,TableAccountMasterDetailedInfo.[OF2] As TAMAIZoneCode
+	'	,ISNull(TableZoneMaster.[Name],'') As TZMName
+	'	,TableAccountMasterDetailedInfo.[OF3] As TAMAITerritoryCode
+	'	,ISNULL(TableTerritoryMaster.[Name],'') As TTMName
+	'	,TableAccountMasterDetailedInfo.[OF4] As TAMAICityCode
+	'	,ISNULL(TableCityMaster.[Name],'') As TCMName
+	'	,TableAccountMasterDetailedInfo.[PINCode] As PINCode
+	'	,TableAccountMasterDetailedInfo.[Contact] As TAMDIPartyContact
+	'	,TableAccountMasterDetailedInfo.[WhatsAppNo] As TAMDIWhatsAppNo
+	'	,ISNULL(TableAccountMasterDetailedInfo.[OF5],'') As TAMAITerritoryManagerCode
+	'	,ISNULL(TableTerritoryManagerMaster.[Name],'') As TTMMName
+	'	,ISNULL(TableAccountMasterDetailedInfo.[OF6],'') As TAMAIAccountManagerCode
+	'	,ISNULL(TableAccountManagerMaster.[Name],'') As TAMMName
+	'	,ISNULL(TableAccountMasterDetailedInfo.[OF7],'') As TAMDIPartyTypeCode
+	'	,ISNULL(TablePartyTypeMaster.[Name],'') As TAMDIPartyTypeName
+	'	,ISNULL(TableAccountMasterDetailedInfo.[OF8],'') As TAMDIPartyKYCStatusCode
+	'	,ISNULL(TablePartyKYCStatusMaster.[Name],'') As TAMDIPartyKYCStatusName
+	'	,ISNULL(TableTransactionReferences.[Value1],'') As TRFAmountAdjusted
+	'	,ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TableTransactionReferences.[DueDate]),'') As DueInDays
+	'	,ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TablePaymentInTransaction.[Date]),'') As NumberOfDaysInAdjustment
+	'	,(ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TableTransactionReferences.[DueDate]),'') - ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TablePaymentInTransaction.[Date]),'')) As DueDaysMinusAdjustmentDays
+	'	,TablePaymentInTransaction.[Value1] As TRITTransactionAmount
+	'	,ISNULL(TablePaymentAgentMaster.[Name],'') As TCAMPaymentAgentName
+	'	,ISNULL(TableFundsPaidBy.[Name],'') As TFRBFundsPaidBy
+	'	,ISNULL(TableFundsPaymentMode.[Name],'') As TFRMFundsPaymentMode
+	'	,TablePaymentInTransaction.[ShortNar] As ShortNarration
+	'	,TablePaymentInTransaction.[VchCode] As TRITVchCode
+	'	,TablePaymentInTransaction.[SrNo] As TRITSrNo
+	'	,TablePaymentInTransaction.[Date] As TRITPaymentDate
+	'	,LTRIM(RTRIM(TablePaymentInTransaction.[VchNo])) As TRITPaymentVchNo
+	'	,ISNULL(TableTransactionReferences.[Method],0) As TTFReferenceMethod
+	'	,ISNULL(TableReportNotes.TRNDate,'') As LastRemarksByPartyDate
+	'	,ISNULL(TableReportNotes.[TRNDescription],'') As LastRemarksByPartyDescription
+	'	,ISNULL(TableReportNotes.TRNUsername,'') As LastRemarksByPartyReportedBy
+	'	,ISNULL(TableBrokerMaster.[Name],'') As TSMPurchaseVoucherByBrokerName
+	'	, ''  As BrokerComission /*(ISNULL(TableTransactionReferences.[Value1],0)*0.001) As BrokerComission*/
+	'	,ISNULL(TablePaymentAgentMaster.[Name],'') As TCAMPaymentAgentName
+	'	,'' AS PaymentAgentComissoin /*(ISNULL(TableTransactionReferences.[Value1],0)*0.002) As PaymentAgentComissoin*/
+	'/*
+	',TableTransactionReferences.*
+	',TablePaymentInTransaction.*
+	',TableTransactionReferences.*
+	',TableReferenceDetails.*
+	'*/
+	'FROM [Tran2] As TablePaymentInTransaction
+	'	LEFT JOIN [VchOtherInfo] As TablePaymentVoucherOtherInfo 
+	'		ON TablePaymentInTransaction.[VchCode] = TablePaymentVoucherOtherInfo.[VchCode]
+	'	LEFT JOIN [Master1] As TableAccountMaster 
+	'		ON TablePaymentInTransaction.[MasterCode1] = TableAccountMaster.[Code]
+	'	LEFT JOIN [MasterAddressInfo] As TableAccountMasterDetailedInfo 
+	'		ON TablePaymentInTransaction.[MasterCode1] = TableAccountMasterDetailedInfo.[MasterCode] 
+	'	LEFT JOIN [Master1] As TableZoneMaster 
+	'		ON TableZoneMaster.[Code] = TableAccountMasterDetailedInfo.[OF2]  
+	'	LEFT JOIN [Master1] As TableTerritoryMaster 
+	'		ON TableTerritoryMaster.[Code] = TableAccountMasterDetailedInfo.[OF3]  
+	'	LEFT JOIN [Master1] As TableCityMaster 
+	'		ON TableCityMaster.[Code] = TableAccountMasterDetailedInfo.[OF4]  
+	'	LEFT JOIN [Master1] As TableTerritoryManagerMaster 
+	'		ON TableTerritoryManagerMaster.[Code] = TableAccountMasterDetailedInfo.[OF5]  
+	'	LEFT JOIN [Master1] As TableAccountManagerMaster 
+	'		ON TableAccountManagerMaster.[Code] = TableAccountMasterDetailedInfo.[OF6] 
+	'	LEFT JOIN [Master1] As TablePartyTypeMaster 
+	'		ON TablePartyTypeMaster.[Code] = TableAccountMasterDetailedInfo.[OF7] 
+	'	LEFT JOIN [Master1] As TablePartyKYCStatusMaster 
+	'		ON TablePartyKYCStatusMaster.[Code] = TableAccountMasterDetailedInfo.[OF8] 
+	'	LEFT JOIN [Master1] As TableFundsPaidBy
+	'		ON TableFundsPaidBy.[Code] = TablePaymentVoucherOtherInfo.[OF1] 
+	'	LEFT JOIN [Master1] As TableFundsPaymentMode
+	'		ON TableFundsPaymentMode.[Code] = TablePaymentVoucherOtherInfo.[OF2] 
+	'	LEFT JOIN [Master1] As TablePaymentAgentMaster 
+	'		ON TablePaymentInTransaction.[CM6] = TablePaymentAgentMaster.[Code]
+	'	LEFT JOIN [Tran3] As TableTransactionReferences
+	'		ON TablePaymentInTransaction.[VchCode] = TableTransactionReferences.[VchCode]
+	'		AND TablePaymentInTransaction.[MasterCode1] = TableTransactionReferences.[MasterCode1]
+	'	LEFT JOIN [Tran1] As TableReferenceDetails
+	'		ON TablePaymentInTransaction.[MasterCode1] = TableReferenceDetails.[MasterCode1]
+	'		AND TableTransactionReferences.[No] = TableReferenceDetails.[VchNo]
+	'	LEFT JOIN [Master1] As TableBrokerMaster 
+	'	ON TableReferenceDetails.[CM4] = TableBrokerMaster.[Code]
+	
+	'	OUTER APPLY (
+	'		SELECT TOP 1 
+	'			TableReportNotes.[Date] As TRNDate
+	'			,TableReportNotes.[Description] As TRNDescription
+	'			,TableReportNotes.[Username] As TRNUsername
+	'		FROM 
+	'			[ReportNotes] AS TableReportNotes
+	'			LEFT JOIN [Master1] As TableVendorMaster 
+	'				ON TableReportNotes.[MasterCode] = TableVendorMaster.[Code] 
+	'		WHERE 
+	'			TableReportNotes.[MasterCode] = TablePaymentInTransaction.[MasterCode1]
+	'		Order By 
+	'			TableReportNotes.[Date] DESC) 
+	'		AS TableReportNotes 
+	
+	'WHERE 
+	'	TablePaymentInTransaction.[VchType] IN (14)
+	'	And TablePaymentInTransaction.[Date] >='11-01-2022' 
+	'	And TablePaymentInTransaction.[Date] <='11-13-2022'
+	'	And LTRIM(RTRIM(TablePaymentInTransaction.[VchNo]))  LIKE '%LKO-Rcpt-2905-Cash%'
+	'Order By 
+	'	TablePaymentInTransaction.[Date] ASC
+	'	,TablePaymentInTransaction.[VchCode] ASC
+	'	,TablePaymentInTransaction.[SrNo] Asc
+	'		Go
+	
+	
+	
+	'Select SQL Query
+	'NON Visible Fields
+	SelectQuery = "SELECT ISNULL(TableTransactionReferences.[RefCode],0) As TTRRefCode"				
+	
+	'Ref Vch Date	Date	CENTER	16	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableReferenceDetails.[Date],'') As TRDReferenceVoucherDate"
+	
+	'Ref Vch Date	Date	CENTER	16	---	No	
+	SelectQuery = SelectQuery & ",ISNULL(TableTransactionReferences.[DueDate],'') As TTRDueDate"	
+	
+	'Ref Vch No	Text	LEFT	16	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableReferenceDetails.[VchCode],0) As TRDVchCode"		
+	SelectQuery = SelectQuery & ",ISNULL(LTRIM(RTRIM(TableTransactionReferences.[No])),'') As TTRVchNo"		
+	
+	'Broker Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableBrokerMaster.[Code],'') As TSMBrokerCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableBrokerMaster.[Name],'') As TSMPurchaseVoucherByBrokerName"
+	
+	'Party Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TablePaymentInTransaction.[MasterCode1] As TRINAccountCode"
+	SelectQuery = SelectQuery & ",TableAccountMaster.[Name] As TAMAccountName"	
+	
+	'Party Code	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMaster.[Alias] As TPMAlias"
+	
+	'Zone	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF2] As TAMAIZoneCode"
+	SelectQuery = SelectQuery & ",ISNull(TableZoneMaster.[Name],'') As TZMName"	
+	'Territory	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF3] As TAMAITerritoryCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableTerritoryMaster.[Name],'') As TTMName"
+	
+	'City	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF4] As TAMAICityCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableCityMaster.[Name],'') As TCMName"	
+	'Pincode	Text	CENTER	12	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[PINCode] As PinCode"
+	
+	'Party Contact	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[Contact] As TAMDIPartyContact"
+	
+	'Party WhatsAppNo	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[WhatsAppNo] As TAMDIWhatsAppNo"
+	
+	'Territory Manager	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableAccountMasterDetailedInfo.[OF5],'') As TAMAITerritoryManagerCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableTerritoryManagerMaster.[Name],'') As TTMMName"	
+	'Account Manager	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableAccountMasterDetailedInfo.[OF6],'') As TAMAIAccountManagerCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableAccountManagerMaster.[Name],'') As TAMMName"
+	'Type	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableAccountMasterDetailedInfo.[OF7],'') As TAMDIPartyTypeCode"
+	SelectQuery = SelectQuery & ",ISNULL(TablePartyTypeMaster.[Name],'') As TAMDIPartyTypeName"
+	'KYC Status	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableAccountMasterDetailedInfo.[OF8],'') As TAMDIPartyKYCStatusCode"
+	SelectQuery = SelectQuery & ",ISNULL(TablePartyKYCStatusMaster.[Name],'') As TAMDIPartyKYCStatusName"
+	'Amount Adjusted	Numeric	RIGHT	16	2	Yes
+	SelectQuery = SelectQuery & ",ISNULL(TableTransactionReferences.[Value1],'') As TRFAmountAdjusted"
+	'Due in Days	Numeric	CENTER	4	0	No
+	'SelectQuery = SelectQuery & ",ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TableTransactionReferences.[DueDate]),'') As DueInDays"
+	SelectQuery = SelectQuery & ",'' As DueInDays"	
+	'Number of Days in Adjustment	Numeric	CENTER	4	0	No
+	'SelectQuery = SelectQuery & ",ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TablePaymentInTransaction.[Date]),'') As NumberOfDaysInAdjustment"
+	SelectQuery = SelectQuery & ",'' As NumberOfDaysInAdjustment"	
+	'Due Days Minus Adjustment Days	Numeric	CENTER	4	0	No
+	'SelectQuery = SelectQuery & ",(ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TableTransactionReferences.[DueDate]),'') - ISNULL(DATEDIFF('DAY',TableReferenceDetails.[Date],TablePaymentInTransaction.[Date]),'')) As DueDaysMinusAdjustmentDays"
+	SelectQuery = SelectQuery & ",'' As DueDaysMinusAdjustmentDays"
+	'Transaction Amount	Numeric	RIGHT	16	2	No
+	SelectQuery = SelectQuery & ",TablePaymentInTransaction.[Value1] As TRITTransactionAmount"
+	'Payment Agent Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TablePaymentAgentMaster.[Name],'') As TCAMPaymentAgentName"
+	'Funds Paid By	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableFundsPaidBy.[Name],'') As TFRBFundsPaidBy"
+	'Funds Payment Mode	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableFundsPaymentMode.[Name],'') As TFRMFundsPaymentMode"
+	'Short Narration	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TablePaymentInTransaction.[ShortNar] As ShortNarration"
+	
+	SelectQuery = SelectQuery & ",TablePaymentInTransaction.[VchCode] As TRITVchCode"
+	SelectQuery = SelectQuery & ",TablePaymentInTransaction.[SrNo] As TRITSrNo"
+	'Payment Date	Date	CENTER	16	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TablePaymentInTransaction.[Date],'') As TRITPaymentDate"
+	'Payment VchNo	Text	CENTER	16	---	No
+	SelectQuery = SelectQuery & ",LTRIM(RTRIM(TablePaymentInTransaction.[VchNo])) As TRITPaymentVchNo"
+	'Reference Method	Numeric	CENTER	1	0	No
+	SelectQuery = SelectQuery & ",ISNULL(TableTransactionReferences.[Method],0) As TTFReferenceMethod"
+	'Last Remarks By Party Date	Date	CENTER	16	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableReportNotes.TRNDate,'') As LastRemarksByPartyDate"
+	'Last Remarks By Party Description	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableReportNotes.[TRNDescription],'') As LastRemarksByPartyDescription"
+	'Last Remarks By Party Reported By	Text	LEFT	20	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableReportNotes.TRNUsername,'') As LastRemarksByPartyReportedBy"
+	'Broker Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableBrokerMaster.[Name],'') As TSMPurchaseVoucherByBrokerName"
+	'Broker Commission	Numeric	RIGHT	16	2	Yes
+	SelectQuery = SelectQuery & ", ''  As BrokerComission /*(ISNULL(TableTransactionReferences.[Value1],0)*0.001) As BrokerComission*/"
+	'Payment Agent Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TablePaymentAgentMaster.[Name],'') As TCAMPaymentAgentName"
+	'Payment Agent Commission	Numeric	RIGHT	16	2	Yes
+	SelectQuery = SelectQuery & ",'' AS PaymentAgentComissoin /*(ISNULL(TableTransactionReferences.[Value1],0)*0.002) As PaymentAgentComissoin*/"
+	
+	'SELECT From (The Start table)
+	SelectQuery = SelectQuery & " FROM [Tran2] As TablePaymentInTransaction "
+	
+	SelectQuery = SelectQuery & "LEFT JOIN [VchOtherInfo] As TablePaymentVoucherOtherInfo ON TablePaymentInTransaction.[VchCode] = TablePaymentVoucherOtherInfo.[VchCode] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableAccountMaster ON TablePaymentInTransaction.[MasterCode1] = TableAccountMaster.[Code] "
+	SelectQuery = SelectQuery & "LEFT JOIN [MasterAddressInfo] As TableAccountMasterDetailedInfo ON TablePaymentInTransaction.[MasterCode1] = TableAccountMasterDetailedInfo.[MasterCode] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableZoneMaster ON TableZoneMaster.[Code] = TableAccountMasterDetailedInfo.[OF2] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableTerritoryMaster ON TableTerritoryMaster.[Code] = TableAccountMasterDetailedInfo.[OF3] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableCityMaster ON TableCityMaster.[Code] = TableAccountMasterDetailedInfo.[OF4] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableTerritoryManagerMaster ON TableTerritoryManagerMaster.[Code] = TableAccountMasterDetailedInfo.[OF5] "				
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableAccountManagerMaster ON TableAccountManagerMaster.[Code] = TableAccountMasterDetailedInfo.[OF6] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TablePartyTypeMaster ON TablePartyTypeMaster.[Code] = TableAccountMasterDetailedInfo.[OF7] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TablePartyKYCStatusMaster ON TablePartyKYCStatusMaster.[Code] = TableAccountMasterDetailedInfo.[OF8] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableFundsPaidBy ON TableFundsPaidBy.[Code] = TablePaymentVoucherOtherInfo.[OF1] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableFundsPaymentMode ON TableFundsPaymentMode.[Code] = TablePaymentVoucherOtherInfo.[OF2] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TablePaymentAgentMaster ON TablePaymentInTransaction.[CM6] = TablePaymentAgentMaster.[Code] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Tran3] As TableTransactionReferences ON TablePaymentInTransaction.[VchCode] = TableTransactionReferences.[VchCode] "
+	SelectQuery = SelectQuery & "AND TablePaymentInTransaction.[MasterCode1] = TableTransactionReferences.[MasterCode1] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Tran1] As TableReferenceDetails ON TablePaymentInTransaction.[MasterCode1] = TableReferenceDetails.[MasterCode1] "
+	SelectQuery = SelectQuery & "AND TableTransactionReferences.[No] = TableReferenceDetails.[VchNo] "
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableBrokerMaster ON TableReferenceDetails.[CM4] = TableBrokerMaster.[Code] "
+	SelectQuery = SelectQuery & "OUTER APPLY ( "
+	SelectQuery = SelectQuery & "SELECT TOP 1 "
+	SelectQuery = SelectQuery & "TableReportNotes.[Date] As TRNDate "
+	SelectQuery = SelectQuery & ",TableReportNotes.[Description] As TRNDescription "
+	SelectQuery = SelectQuery & ",TableReportNotes.[Username] As TRNUsername "	
+	SelectQuery = SelectQuery & "FROM "	
+	SelectQuery = SelectQuery & "[ReportNotes] AS TableReportNotes "	
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableVendorMaster "	
+	SelectQuery = SelectQuery & "ON TableReportNotes.[MasterCode] = TableVendorMaster.[Code] "	
+	SelectQuery = SelectQuery & "WHERE "	
+	SelectQuery = SelectQuery & "TableReportNotes.[MasterCode] = TablePaymentInTransaction.[MasterCode1] "	
+	SelectQuery = SelectQuery & "Order By "								
+	SelectQuery = SelectQuery & "TableReportNotes.[Date] DESC) "									
+	SelectQuery = SelectQuery & "AS TableReportNotes "		
+	SelectQuery = SelectQuery & " "	
+	SelectQuery = SelectQuery & " "			
+	'WHERE Clause
+	SelectQuery = SelectQuery & "WHERE "
+	'SelectQuery = SelectQuery & "TablePaymentInTransaction.[VchType] IN ("&BusyConst.PAYMENT&","&BusyConst.JOURNAL&") "	
+	SelectQuery = SelectQuery & "TablePaymentInTransaction.[VchType] IN ("&BusyConst.PAYMENT&","&BusyConst.JOURNAL&") "	
+	
+	'Selected Date Parameter'	
+	SelectQuery = SelectQuery & _
+	"And TablePaymentInTransaction.[Date] >=" & BusyLib.GetDateQryStr(BusyRepOpt.OptStartDate) & " And TablePaymentInTransaction.[Date] <=" & BusyLib.GetDateQryStr(BusyRepOpt.OptEndDate) &" "
+	
+	'Selected Account Masters Code - Added in WHERE Clause
+	If (varAccountMasterCodes <> "" And varAccountMasterSelectionType = 1) Then
+		SelectQuery = SelectQuery & _
+		"And TablePaymentInTransaction.[MasterCode1] IN ("&varAccountMasterCodes&") "
+	End If
+	'Selected Account Master Group Code
+	If (varAccountMasterParentGroupCode <> ""  And varAccountMasterSelectionType = 2)Then
+		SelectQuery = SelectQuery & _
+		"And TableAccountMaster.[ParentGrp] IN ("&varAccountMasterParentGroupCode&") "
+	End If
+	'Selected Account Masters Codes
+	If (varAccountMasterCodes <> "" And varAccountMasterSelectionType = 4) Then
+		SelectQuery = SelectQuery & _
+		"And TablePaymentInTransaction.[MasterCode1] IN ("&varAccountMasterCodes&") "
+	End If
+	
+	'Selected Brokers Code - Added in WHERE Clause
+	If (varBrokerCodes <> "" And varBrokerSelectionType = 1) Then
+		SelectQuery = SelectQuery & _
+		"And TableReferenceDetails.[CM4] IN ("&varBrokerCodes&") "
+	End If
+	'Selected Broker Group Code
+	If (varBrokerParentGroupCode <> ""  And varBrokerSelectionType = 2)Then
+		SelectQuery = SelectQuery & _
+		"And TableBrokerMaster.[ParentGrp] IN ("&varBrokerParentGroupCode&") "
+	End If
+	'Selected Brokers Codes
+	If (varBrokerCodes <> "" And varBrokerSelectionType = 4) Then
+		SelectQuery = SelectQuery & _
+		"And TableReferenceDetails.[CM4] IN ("&varBrokerCodes&") "
+	End If
+	
+	'Payment Agent Name Text To Search
+	If varPaymentAgentNameToSearch <> "" And Len(varPaymentAgentNameToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TablePaymentAgentMaster.[Name] LIKE '"&varPaymentAgentNameToSearch&"' "
+	End If
+	
+	'Part Name Text To Search
+	If varPartyNameTextToSearch <> "" And Len(varPartyNameTextToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TableAccountMaster.[Name] LIKE '"&varPartyNameTextToSearch&"' "
+	End If
+	'Ignore Part Name Text To Search
+	If varIgnorePartyNameTextToSearch <> "" And Len(varIgnorePartyNameTextToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TableAccountMaster.[Name] NOT LIKE '"&varIgnorePartyNameTextToSearch&"' "
+	End If
+	
+	
+	'Order By
+	SelectQuery = SelectQuery & " Order By TablePaymentInTransaction.[Date] ASC,TablePaymentInTransaction.[VchCode] ASC,TablePaymentInTransaction.[SrNo] Asc"
+	
+	'MsgBox(SelectQuery)
+	'WriteInEventLog SelectQuery,CTBCRScriptLogFileName
+	'Exit Sub
+	Set RecordSet= BusyLib.GetRecordset(SelectQuery)
+	'MsgBox("Records from DB - " & RecordSet.RecordCount)
+	'Exit Sub
+	With RecordSet
+		If .RecordCount>0 Then
+			.MoveLast
+			.MoveFirst
+			
+			Grid_Total_Rows .RecordCount
+			
+			Do While Not .EOF
+				If m_QuitRep=True Then Exit Sub
+				
+				varAssumed10GPofAdjustmentAmountforCommission = 0
+				varBrokerCommissionPercentageBasedonDays = 0
+				varBrokerCommission = 0
+				varPaymentAgentCommissionPercentageBasedonDays = 0
+				varPaymentAgentCommission = 0
+				
+				
+				'				Grid_New_Entry 
+				'Party Name	Text	LEFT	40	---	No
+				'Last Remarks By Party Date	Date	CENTER	16	---	No
+				'Last Remarks By Party Description	Text	LEFT	40	---	No
+				'Last Remarks By Party Reported By	Text	LEFT	20	---	No
+				'Party Code	Text	LEFT	40	---	No
+				'Zone	Text	LEFT	40	---	No
+				'Territory	Text	LEFT	40	---	No
+				'City	Text	LEFT	40	---	No
+				'Pincode	Text	CENTER	12	---	No
+				'Party Contact	Text	LEFT	40	---	No
+				'Party WhatsAppNo	Text	LEFT	40	---	No
+				'Territory Manager	Text	LEFT	40	---	No
+				'Account Manager	Text	LEFT	40	---	No
+				'Type	Text	LEFT	40	---	No
+				'KYC Status	Text	LEFT	40	---	No
+				'Party Name	Text	LEFT	40	---	No
+				'Ref Vch No	Text	LEFT	16	---	No
+				'Ref Vch Date	Date	CENTER	16	---	No
+				'Ref Vch Due Date	Date	CENTER	16	---	No
+				'Broker Name	Text	LEFT	40	---	No
+				'Amount Adjusted	Numeric	RIGHT	16	2	Yes
+				'Due in Days	Numeric	CENTER	4	0	No
+				'Number of Days in Adjustment	Numeric	CENTER	4	0	No
+				'Due Days Minus Adjustment Days	Numeric	CENTER	4	0	No
+				'Transaction Amount	Numeric	RIGHT	16	2	Yes
+				'Payment Agent Name	Text	LEFT	40	---	No
+				'Payment Date	Date	CENTER	16	---	No
+				'Funds Paid By	Text	LEFT	40	---	No
+				'Funds Payment Mode	Text	LEFT	40	---	No
+				'Short Narration	Text	LEFT	40	---	No
+				'Payment VchNo	Text	CENTER	16	---	No
+				'Reference Method	Numeric	CENTER	1	0	No
+				'Assumed 10% GP of Adjustment Amount for Commission	Numeric	RIGHT	8	2	No
+				'Broker Name	Text	LEFT	40	---	No
+				'Commission @ % Based on Days	Numeric	RIGHT	4	2	No
+				'Broker Commission	Numeric	RIGHT	16	2	Yes
+				'Payment Agent Name	Text	LEFT	40	---	No
+				'Commission @ % Based on Days	Numeric	RIGHT	4	2	No
+				'Payment Agent Commission	Numeric	RIGHT	16	2	Yes				
+				
+				'Update the NON Visible Fields Data
+				'Voucher Code
+				varTTFReferenceMethod = .Fields("TTFReferenceMethod").Value
+				
+				'Party Name	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMAccountName").Value
+				
+				'Last Remarks By Party Date	Date	CENTER	16	---	No
+				Grid_Throw_Data  .Fields("LastRemarksByPartyDate").Value
+				
+				'Last Remarks By Party Description	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("LastRemarksByPartyDescription").Value
+				
+				'Last Remarks By Party Reported By	Text	LEFT	20	---	No
+				Grid_Throw_Data  .Fields("LastRemarksByPartyReportedBy").Value
+				
+				'Party Code	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TPMAlias").Value
+				
+				'Zone	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TZMName").Value
+				
+				'Territory	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TTMName").Value
+				
+				'City	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TCMName").Value
+				
+				'Pincode	Text	CENTER	12	---	No
+				Grid_Throw_Data  .Fields("PINCode").Value
+				
+				'Party Contact	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMDIPartyContact").Value
+				
+				'Party WhatsAppNo	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMDIWhatsAppNo").Value
+				
+				'Territory Manager	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TTMMName").Value
+				
+				'Account Manager	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMMName").Value
+				
+				'Type	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMDIPartyTypeName").Value
+				
+				'KYC Status	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMDIPartyKYCStatusName").Value
+				
+				'Party Name	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TAMAccountName").Value
+				
+				'Ref Vch No	Text	LEFT	16	---	No
+				Grid_Throw_Data  .Fields("TTRVchNo").Value				
+				
+				'Ref Vch Date	Date	CENTER	16	---	No
+				Grid_Throw_Data .Fields("TRDReferenceVoucherDate").Value
+				
+				'Ref Vch Due Date	Date	CENTER	16	---	No
+				Grid_Throw_Data .Fields("TTRDueDate").Value
+				
+				'Broker Name	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TSMPurchaseVoucherByBrokerName").Value
+				
+				'Amount Adjusted	Numeric	RIGHT	16	2	Yes
+				varAmountAdjusted = (0-.Fields("TRFAmountAdjusted").Value)
+				If varAmountAdjusted > 0 Then
+					Grid_Throw_Data  varAmountAdjusted
+				Else 
+					Grid_Throw_Data  ""
+				End If
+				
+				'Due in Days	Numeric	CENTER	4	0	No
+				'WriteInEventLog .Fields("TRDReferenceVoucherDate").Value & " : " & .Fields("TTRDueDate").Value ,CTBCRScriptLogFileName
+				If (varTTFReferenceMethod <> 0 And .Fields("TRDReferenceVoucherDate").Value <> "1/1/1900" And .Fields("TTRDueDate").Value <> "1/1/1900" ) Then
+					varDueinDays = DateDiff("d",.Fields("TRDReferenceVoucherDate").Value,.Fields("TTRDueDate").Value)
+					Grid_Throw_Data  varDueinDays
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				
+				'Number of Days in Adjustment	Numeric	CENTER	4	0	No
+				If (varTTFReferenceMethod <> 0 And .Fields("TRDReferenceVoucherDate").Value <> "1/1/1900"  And .Fields("TRITPaymentDate").Value <> "1/1/1900") Then
+					varNumberofDaysinAdjustment = DateDiff("d",.Fields("TRDReferenceVoucherDate").Value,.Fields("TRITPaymentDate").Value)
+					Grid_Throw_Data  varNumberofDaysinAdjustment
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Due Days Minus Adjustment Days	Numeric	CENTER	4	0	No
+				If (varTTFReferenceMethod <> 0 And .Fields("TTRDueDate").Value <> "1/1/1900" And .Fields("TRITPaymentDate").Value <> "1/1/1900") Then
+					varDueDaysMinusAdjustmentDays = DateDiff("d",.Fields("TTRDueDate").Value,.Fields("TRITPaymentDate").Value)
+					Grid_Throw_Data varDueDaysMinusAdjustmentDays
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Transaction Amount	Numeric	RIGHT	16	2	No
+				varTransactionAmount = .Fields("TRITTransactionAmount").Value
+				If varTransactionAmount > 0 Then
+					Grid_Throw_Data  .Fields("TRITTransactionAmount").Value
+				Else
+					Grid_Throw_Data  ""
+				End If
+				
+				'Payment Agent Name	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TCAMPaymentAgentName").Value
+				
+				'Payment Date	Date	CENTER	16	---	No
+				Grid_Throw_Data  .Fields("TRITPaymentDate").Value
+				
+				'Funds Paid By	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TFRBFundsPaidBy").Value
+				
+				'Funds Payment Mode	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TFRMFundsPaymentMode").Value
+				
+				'Short Narration	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("ShortNarration").Value
+				
+				'Payment VchNo	Text	CENTER	16	---	No
+				Grid_Throw_Data  .Fields("TRITPaymentVchNo").Value
+				
+				'Reference Method	Numeric	CENTER	1	0	No
+				Grid_Throw_Data  .Fields("TTFReferenceMethod").Value
+				
+				If varAmountAdjusted > 0 And varNumberofDaysinAdjustment => 0 And varNumberofDaysinAdjustment < 11 Then
+					varBrokerCommissionPercentageBasedonDays = CTBrokerComission0To10Days
+					varBrokerCommission = (varAmountAdjusted * CTBrokerComission0To10Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varAmountAdjusted > 0 And varNumberofDaysinAdjustment => 11 And varNumberofDaysinAdjustment < 21 Then
+					varBrokerCommissionPercentageBasedonDays = CTBrokerComission11To20Days
+					varBrokerCommission = (varAmountAdjusted * CTBrokerComission11To20Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varAmountAdjusted > 0 And varNumberofDaysinAdjustment => 21 And varNumberofDaysinAdjustment < 31 Then
+					varBrokerCommissionPercentageBasedonDays = CTBrokerComission21To30Days
+					varBrokerCommission = (varAmountAdjusted * CTBrokerComission21To30Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varAmountAdjusted > 0 And varNumberofDaysinAdjustment => 31 And varNumberofDaysinAdjustment < 61 Then
+					varBrokerCommissionPercentageBasedonDays = CTBrokerComission31To60Days					
+					varBrokerCommission = (varAmountAdjusted * CTBrokerComission31To60Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varAmountAdjusted > 0 And varNumberofDaysinAdjustment => 61 Then
+					varBrokerCommissionPercentageBasedonDays = CTBrokerComissionAbove60Days				
+					varBrokerCommission = (varAmountAdjusted * CTBrokerComissionAbove60Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				Else
+					varBrokerCommission = ""
+				End If
+				
+				
+				
+				If varAmountAdjusted > 0 And varDueDaysMinusAdjustmentDays < 11 Then
+					varPaymentAgentCommissionPercentageBasedonDays = CTPaymentAgentComissionDueDaysPlus0To10Days
+					varPaymentAgentCommission = (varAmountAdjusted * CTPaymentAgentComissionDueDaysPlus0To10Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varAmountAdjusted > 0 And varDueDaysMinusAdjustmentDays => 11 And varDueDaysMinusAdjustmentDays < 21 Then
+					varPaymentAgentCommissionPercentageBasedonDays = CTPaymentAgentComissionDueDaysPlus11To20Days
+					varPaymentAgentCommission = (varAmountAdjusted * CTPaymentAgentComissionDueDaysPlus11To20Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varAmountAdjusted > 0 And varDueDaysMinusAdjustmentDays => 21 And varDueDaysMinusAdjustmentDays < 31 Then
+					varPaymentAgentCommissionPercentageBasedonDays = CTPaymentAgentComissionDueDaysPlus21To30Days
+					varPaymentAgentCommission = (varAmountAdjusted * CTPaymentAgentComissionDueDaysPlus21To30Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				ElseIf varAmountAdjusted > 0 And varDueDaysMinusAdjustmentDays => 31 Then
+					varPaymentAgentCommissionPercentageBasedonDays = CTPaymentAgentComissionDueDaysPlusAbove30Days				
+					varPaymentAgentCommission = (varAmountAdjusted * CTPaymentAgentComissionDueDaysPlusAbove30Days * CTAssumed10GPofAdjustmentAmountforCommission)
+				Else
+					varPaymentAgentCommission = ""
+				End If
+				If varTTFReferenceMethod <> 0 Then	
+					
+					'Number of Days in Adjustment	Numeric	CENTER	4	0	No
+					Grid_Throw_Data varDueDaysMinusAdjustmentDays
+					
+					'Assumed 10% GP of Adjustment Amount for Commission	Numeric	RIGHT	8	2	No
+					varAssumed10GPofAdjustmentAmountforCommission = varAmountAdjusted * CTAssumed10GPofAdjustmentAmountforCommission
+					Grid_Throw_Data varAssumed10GPofAdjustmentAmountforCommission
+					
+					If .Fields("TSMPurchaseVoucherByBrokerName").Value <> "" Then
+						'Broker Name	Text	LEFT	40	---	No
+						Grid_Throw_Data  .Fields("TSMPurchaseVoucherByBrokerName").Value
+					Else
+						Grid_Throw_Data	""
+					End If
+					'Commission @ % Based on Days	Numeric	RIGHT	4	2	No
+					'Grid_Throw_Data (varBrokerCommissionPercentageBasedonDays * 100) & "%"
+					Grid_Throw_Data ""
+					
+					'Broker Commission	Numeric	RIGHT	16	2	Yes
+					'Grid_Throw_Data	varBrokerCommission						
+					Grid_Throw_Data ""
+					
+					If .Fields("TCAMPaymentAgentName").Value <> "" Then 
+						'Payment Agent Name	Text	LEFT	40	---	No
+						Grid_Throw_Data  .Fields("TCAMPaymentAgentName").Value
+					Else
+						Grid_Throw_Data	""			
+					End If
+					If varPaymentAgentCommission <> "" Then
+						'Commission @ % Based on Days	Numeric	RIGHT	4	2	No
+						Grid_Throw_Data  (varPaymentAgentCommissionPercentageBasedonDays * 100) & "%"
+						
+						'Payment Agent Commission	Numeric	RIGHT	16	2	Yes	
+						Grid_Throw_Data  varPaymentAgentCommission							
+					Else 
+						Grid_Throw_Data ""
+						Grid_Throw_Data ""
+						
+					End If
+				Else
+					Grid_Throw_Data ""
+					Grid_Throw_Data ""
+					Grid_Throw_Data ""					
+					Grid_Throw_Data ""
+					Grid_Throw_Data ""					
+					Grid_Throw_Data ""
+					Grid_Throw_Data ""					
+				End If
+				Grid_Next_Row .Fields("TRDVchCode").Value&"-"&.Fields("TRINAccountCode").Value&"-"&.Fields("TRITVchCode").Value
+				.MoveNext
+			Loop
+		End If
+	End With
+	
+	
+End Sub
+
+
+Public Sub OnEnterChs(p_OnEnterInfo)
+	Dim varOptionToOpen	
+	Dim varVoucherCodes
+	Dim varPurchaseVoucherCode
+	Dim varAccountMasterCode
+	Dim varPaymentVoucherCode
+	
+	dtmThisDay = Day(Date)
+	dtmThisMonth = Month(Date)
+	dtmThisYear = Year(Date)
+	
+	varVoucherCodes = Split(p_OnEnterInfo,"-")
+	varPurchaseVoucherCode = varVoucherCodes(0)
+	varAccountMasterCode = varVoucherCodes(1)
+	varPaymentVoucherCode = varVoucherCodes(2)	
+	varOptionToOpen =  BusyLib.GetOption3("Choose Option","Purchase Voucher","Account Ledger","Payment Voucher Ledger","More details in",3)
+	If varOptionToOpen = 1 And varPurchaseVoucherCode<>"" Then
+		OnEnter_Modify_Voucher varPurchaseVoucherCode
+	ElseIf varOptionToOpen = 2	 And varAccountMasterCode <> "" Then
+		OnEnter_Acc_Ledger varAccountMasterCode,DateAdd("m",-3,Date),Date	
+	ElseIf varOptionToOpen = 3 And varPaymentVoucherCode <> "" Then
+		OnEnter_Modify_Voucher varPaymentVoucherCode
+	End If	
+End Sub
+
+
+Public Sub UpdateFieldsInfo()
+	BusyGrid.AddTopLabel1 "Payments From: "&Day(BusyRepOpt.OptStartDate)&"-"&Month(BusyRepOpt.OptStartDate)&"-"&Year(BusyRepOpt.OptStartDate)&" To:"&Day(BusyRepOpt.OptEndDate)&"-"&Month(BusyRepOpt.OptEndDate)&"-"&Year(BusyRepOpt.OptEndDate)
+	BusyGrid.AddTopLabel2  CTBCRByPrachaitVersion
+	BusyGrid.AddInfoLabel1 CTBCRResponsbilePersonForReport
+	BusyGrid.AddInfoLabel2 CTBCRByDevelopedPrachaitContactInformation
+	BusyGrid.AddInfoLabel3 CTBCRTodo
+	BusyGrid.AddInfoLabel4 "Status : ... Keep working !"
+End Sub
+
+
+Public Sub UpdateObjects(CEvents)
+	Set BusyLib = CreateObject("Busy2L21.CFixedInterface")
+	Set BusyConst = CreateObject("BusyCSC21.CGlobalConstants")
+	Set BusyRepOpt = CreateObject("Busy2L21.CRepOptions")
+	Set BusyCompConfig = CreateObject("Busy2L21.CCompany")
+	
+	Set BusyGrid = CEvents
+	Set BusyOnEnter = CEvents
+	
+	BusyUpdateRepOpt BusyRepOpt
+	BusyUpdateCompConfig BusyCompConfig
+End Sub
+
+
+Public Sub QuitRep(p_QuitVal)
+	m_QuitRep = p_QuitVal
+End Sub
+
+
+Public Sub Grid_Throw_Data(p_Data)
+	BusyGrid.ThrowData p_Data
+End Sub
+
+
+Public Sub Grid_Next_Row(p_OnEnterInfo)
+	BusyGrid.NextRow p_OnEnterInfo
+End Sub
+
+
+Public Sub Grid_Next_Row_With_Special_Effect(p_OnEnterInfo,p_SEConst)
+	BusyGrid.NextRow p_OnEnterInfo, p_SEConst
+End Sub
+
+
+Public Sub Grid_New_Entry()
+	BusyGrid.NewEntry
+End Sub
+
+
+Public Sub Grid_Total_Rows(p_TotalRows)
+	BusyGrid.TotalRows p_TotalRows
+End Sub
+
+
+Public Sub BusyUpdateCompConfig(p_Obj)
+	BusyGrid.UpdateCompConfig p_Obj
+End Sub
+
+
+Public Sub BusyUpdateRepOpt(p_Obj)
+	BusyGrid.UpdateRepOpt p_Obj
+End Sub
+
+
+Public Sub UpdateFormLabels()
+	
+End Sub
+
+
+Public Sub AddTopLabel1(p_Label)
+	BusyGrid.AddTopLabel1 p_Label 
+End Sub 
+
+
+Public Sub AddTopLabel2(p_Label)
+	BusyGrid.AddTopLabel2 p_Label 
+End Sub 
+
+
+Public Sub AddInfoLabel1(p_Label)
+	BusyGrid.AddInfoLabel1 p_Label 
+End Sub 
+
+
+Public Sub AddInfoLabel2(p_Label)
+	BusyGrid.AddInfoLabel2 p_Label 
+End Sub 
+
+
+Public Sub AddInfoLabel3(p_Label)
+	BusyGrid.AddInfoLabel3 p_Label 
+End Sub 
+
+
+Public Sub AddInfoLabel4(p_Label)
+	BusyGrid.AddInfoLabel4 p_Label 
+End Sub 
+
+
+Public Sub BusySetRepOpt(p_Obj)
+	BusyGrid.SetRepOpt p_Obj
+End Sub
+
+
+Public Sub BusyAddNewColumn(p_ColumnName, p_ColumnDataType, p_ColumnAlignment, p_ColumnMaxChar, p_ColumnMaxDecimal, p_ColumnShowTotal)
+	BusyGrid.AddNewColumn p_ColumnName, p_ColumnDataType, p_ColumnAlignment, p_ColumnMaxChar, p_ColumnMaxDecimal, p_ColumnShowTotal
+End Sub
+
+
+Public Sub OnEnter_Modify_Master(p_MasterType, p_MasterCode)
+	BusyOnEnter.ModifyMaster p_MasterType,p_MasterCode
+End Sub
+
+
+Public Sub OnEnter_Modify_Voucher(p_VchCode)
+	BusyOnEnter.ModifyVoucher p_VchCode
+End Sub
+
+
+Public Sub OnEnter_Acc_Ledger(p_AccCode, p_StartDate, p_EndDate)
+	BusyOnEnter.ShowAccLedger p_AccCode, p_StartDate, p_EndDate 
+End Sub
+
+
+Public Sub OnEnter_Acc_Ledger_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowAccLedgerWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Item_Ledger(p_ItemCode, p_MCCode, p_StartDate, p_EndDate, p_ShowVal, p_IUT)
+	BusyOnEnter.ShowItemMCLedger p_ItemCode, p_MCCode, p_StartDate, p_EndDate, p_ShowVal, p_IUT
+End Sub
+
+
+Public Sub OnEnter_Item_Ledger_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowItemMCLedgerWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Vch_List(p_VchType, p_StartDate, p_EndDate, p_VchSeriesCode)
+	BusyOnEnter.ShowVchsList p_VchType, p_StartDate, p_EndDate, p_VchSeriesCode
+End Sub
+
+
+Public Sub OnEnter_Vch_List_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowVchsListWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Custom_Report(p_FormatName, p_RepOptObj)
+	BusyOnEnter.ShowCustomReport p_FormatName, p_RepOptObj
+End Sub
+
+Public Function WriteInEventLog(LogText,LogFileName)
+	On Error Resume Next	
+	dtmThisDay = Day(Date)
+	dtmThisMonth = Month(Date)
+	dtmThisYear = Year(Date)
+	dtmThisHour = Hour(Time)
+	dtmThisMinute = Minute(Time)
+	dtmThisSecond = Second(Time)
+	
+	If LogFileName = "" Then
+		LogFileName = CTBCRScriptLogFileName
+	End If 
+	Const ForAppending = 8
+	Set objFSO = CreateObject("Scripting.FileSystemObject")
+	
+	Set objTextFile = objFSO.OpenTextFile _
+	(LogFileName, ForAppending, True)
+	objTextFile.Write dtmThisYear&":"& dtmThisMonth&":"& dtmThisDay&" " & dtmThisHour&":"&dtmThisMinute&":"&dtmThisSecond& " - "  & LogText & vbCrLf
+	objTextFile.Close
+	WriteInEventLog = 1
+	'strBackupName = dtmThisYear & "_" & dtmThisMonth & "_" & dtmThisDay
+End Function

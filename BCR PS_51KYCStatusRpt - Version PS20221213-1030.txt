@@ -1,0 +1,776 @@
+Option Explicit
+
+Const CTBCRByPrachaitVersion = "Busy Custom Report - BCR PS_51KYCStatusRpt - Version PS20221213-1030"
+Const CTBCRByDevelopedPrachaitContactInformation = "Developed By Prachait Saxena, +919450901908, info@prachait.com"
+'
+'
+'The Custom Report is to report the KYC Status of the parties.
+'
+'Current Filters in use
+'Account, Sales Person, Party Name, Ignore Party Name, Date of modification
+'Todo:
+'1. Implementaion of filters
+'Change Log
+'PS20221207-1030
+'Addition of On Enter Open Account Master
+'PS20221213-1030
+'Change Salesmain to Broker
+
+Const CTBCRTodo = "Todo: Add NON Sundry accounts"
+Const CTBCRResponsbilePersonForReport = "To be reported by Tanu (Accounts) to management"
+
+Dim objFSO
+Dim objTextFile
+
+Dim BusyLib
+Dim BusyGrid
+Dim BusyOnEnter
+Dim BusyConst
+Dim BusyRepOpt
+Dim BusyCompConfig
+Dim m_QuitRep
+
+Dim varErrorLogFile
+Dim varErrorMessage
+Dim varErrorStatus
+
+Dim dtmThisDay
+Dim dtmThisMonth
+Dim dtmThisYear
+Dim dtmThisHour
+Dim dtmThisMinute
+Dim dtmThisSecond
+
+'Manucturing Brand Additional % Addition
+Public Sub GenerateRep()
+	
+	On Error Resume Next
+	
+	Dim SelectQuery
+	Dim RecordSet
+	Dim OldVchCode 
+	
+	Dim varPartyGroupName
+	Dim varZone
+	Dim varTerritory
+	Dim varCity
+	Dim varTerritoryManager
+	Dim varAccountManager
+	Dim varPartyName
+	Dim varPartyCode
+	Dim varPrintName
+	Dim varContactPerson
+	Dim varMobile
+	Dim varWhatsAppNo
+	Dim varTelephoneNo
+	Dim varEmailAddress
+	Dim varPartyType
+	Dim varKYCStatus
+	Dim varAddressLine1
+	Dim varAddressLine2
+	Dim varAddressLine3
+	Dim varAddressLine4
+	Dim varStationBusyField
+	Dim varCityBusyField
+	Dim varState
+	Dim varCountry
+	Dim varPincode
+	Dim varPAN
+	Dim varAadhaarNumber
+	Dim varAcCreatedBy
+	Dim varAcCreatedOn
+	Dim varAcLastModifiedBy
+	Dim varAcLastModifiedOn
+	
+	OldVchCode=0
+	
+	Dim varCounter
+	
+	'Setup Filters from the Report Options
+	
+	'Filter For Account Master
+	'Variables Used in BusyReportOptions
+	Dim varAccountMasterSelectionType
+	Dim varAccountMasterCodes
+	Dim varAccountMasterParentGroupCode
+	Dim varAccountMasterSelected
+	Dim varAccountMasterSelectedCodes
+	
+	'WriteInEventLog "Account Master Range "&BusyRepOpt.OptAccRange,"Events.log"
+	varAccountMasterSelectionType = BusyRepOpt.OptAccRange
+	If BusyRepOpt.OptAccRange = 1  Then'One Account Selected
+		varAccountMasterCodes = BusyRepOpt.OptAccCode
+		'WriteInEventLog "OptAccCode "&BusyRepOpt.OptAccCode,"Events.log" 'For Single Selection Only
+	ElseIf BusyRepOpt.OptAccRange = 2  Then'Account Group Selected
+		varAccountMasterParentGroupCode = BusyRepOpt.OptAGRPCode
+		'WriteInEventLog "OptAGRPCode "&BusyRepOpt.OptAGRPCode,"Events.log"
+	ElseIf BusyRepOpt.OptAccRange = 3  Then'All Accounts
+		
+	ElseIf BusyRepOpt.OptAccRange = 4  Then'Selected Accounts
+		Set varAccountMasterSelectedCodes = BusyRepOpt.OptAccRangeSelectedCol
+		If varAccountMasterSelectedCodes.Count > 0 Then
+			For varCounter = 1 To varAccountMasterSelectedCodes.Count
+				varAccountMasterCodes =  varAccountMasterCodes & BusyLib.GetItemFromCol(varAccountMasterSelectedCodes, varCounter) & "," 
+			Next 
+		End If 
+		varAccountMasterCodes =  Left(varAccountMasterCodes,Len(varAccountMasterCodes)-1)  
+		If Len(varAccountMasterCodes)=0 Then varAccountMasterCodes="" 
+		varCounter = 0
+		'WriteInEventLog "varAccountMasterCodes "&varAccountMasterCodes,"Events.log" 'For Single Selection Only
+	End If
+	
+	
+	'Filter For Broker
+	Dim varBrokerSelectionType
+	Dim varBrokerCodes
+	Dim varBrokerParentGroupCode
+	Dim varBrokerSelected
+	Dim varBrokerSelectedCodes
+	
+	'WriteInEventLog "Broker Range "&BusyRepOpt.OptBrokerRange,"Events.log"
+	varBrokerSelectionType = BusyRepOpt.OptBrokerRange
+	If BusyRepOpt.OptBrokerRange = 1  Then'One Item Selected
+		varBrokerCodes = BusyRepOpt.OptBrokerCode
+		'WriteInEventLog "OptBrokerCode "&BusyRepOpt.OptBrokerCode,"Events.log" 'For Single Selection Only
+	ElseIf BusyRepOpt.OptBrokerRange = 2  Then'Item Group Selected
+		'varBrokerParentGroupCode = BusyRepOpt.OptIGrpCode
+		'WriteInEventLog "OptAGRPCode "&BusyRepOpt.OptIGrpCode,"Events.log"
+	ElseIf BusyRepOpt.OptBrokerRange = 3  Then'All Items
+		
+	ElseIf BusyRepOpt.OptBrokerRange = 4  Then'Selected Items
+		Set varBrokerSelectedCodes = BusyRepOpt.OptBrokerRangeSelectedCol
+		If varBrokerSelectedCodes.Count > 0 Then
+			For varCounter = 1 To varBrokerSelectedCodes.Count
+				varBrokerCodes =  varBrokerCodes & BusyLib.GetItemFromCol(varBrokerSelectedCodes, varCounter) & "," 
+			Next 
+		End If 
+		varBrokerCodes =  Left(varBrokerCodes,Len(varBrokerCodes)-1)  
+		If Len(varBrokerCodes)=0 Then varBrokerCodes="" 
+		varCounter = 0
+		'WriteInEventLog "varBrokerCodes "&varBrokerCodes,"Events.log" 'For Single Selection Only
+	End If
+	
+	'Filter Party Name with Text
+	Dim varPartyNameTextToSearch
+	varPartyNameTextToSearch = BusyRepOpt.OptText1
+	
+	'Filter Ignore Party Name with Text
+	Dim varIgnorePartyNameTextToSearch
+	varIgnorePartyNameTextToSearch = BusyRepOpt.OptText2
+	
+	'Filter 
+	Dim booleanFilterByDate
+	booleanFilterByDate = BusyRepOpt.OptBool1
+	
+	'SQL Generated from MSSQL Qyery Generation
+	'SELECT
+	'TablePartyGroup.[Name] As TPGPartyGroup
+	',TableAccountMasterDetailedInfo.[OF2] As TAMAIZoneCode
+	',ISNull(TableZoneMaster.[Name],'') As TZMName
+	',TableAccountMasterDetailedInfo.[OF3] As TAMAITerritoryCode
+	',ISNULL(TableTerritoryMaster.[Name],'') As TTMName
+	',TableAccountMasterDetailedInfo.[OF4] As TAMAICityCode
+	',ISNULL(TableCityMaster.[Name],'') As TCMName
+	',TableAccountMasterDetailedInfo.[OF5] As TAMAITerritoryManagerCode
+	',ISNULL(TableTerritoryManagerMaster.[Name],'') As TTMMName
+	',TableAccountMasterDetailedInfo.[OF6] As TAMAIAccountManagerCode
+	',ISNULL(TableAccountManagerMaster.[Name],'') As TAMMName
+	',TablePartyMaster.[Code] As TPMCode
+	',TablePartyMaster.[Name] As TPMPartyName
+	',TablePartyMaster.[Alias] As TPMPartyCode
+	',TablePartyMaster.[PrintName] As TPMPrintName
+	',TableAccountMasterDetailedInfo.[Contact] As TAMDIContactPerson
+	',TableAccountMasterDetailedInfo.[Mobile] As TAMDIMobile
+	',TableAccountMasterDetailedInfo.[WhatsAppNo] As TAMDIWhatsAppNo
+	',TableAccountMasterDetailedInfo.[TelNo] As TAMDITelephoneNo
+	',TableAccountMasterDetailedInfo.[Email] As TAMDIEmailAddress
+	',TableAccountMasterDetailedInfo.[OF7] As TAMDIPartyType
+	',ISNULL(TablePartyType.[Name],'') As TPTPartyType
+	',TableAccountMasterDetailedInfo.[OF8] As TAMDIPartyKYCStatus
+	',ISNULL(TablePartyKYCStatus.[Name],'') As TPKSTablePartyKYCStatus
+	',TableAccountMasterDetailedInfo.[Address1] As TAMDIAddressLine1
+	',TableAccountMasterDetailedInfo.[Address2] As TAMDIAddressLine2
+	',TableAccountMasterDetailedInfo.[Address3] As TAMDIAddressLine3
+	',TableAccountMasterDetailedInfo.[Address4] As TAMDIAddressLine4
+	',TableAccountMasterDetailedInfo.[Station] As TAMDIStation
+	',ISNULL(TableCityMasterAMDI.[Name],'') As TCMAMDICity
+	',TableStateMaster.[Name] As TCMStateName
+	',TableCountryMaster.[Name] As TCMCountryName
+	',TableAccountMasterDetailedInfo.[PINCode] As TAMDIPincode
+	',TableAccountMasterDetailedInfo.[ITPAN] As TAMDIITPAN
+	',TableAccountMasterDetailedInfo.[C3] As TAMDIAadharNumber
+	',TablePartyMaster.[CreatedBy] AS TPMCreatedBy
+	',TablePartyMaster.[CreationTime] AS TPMCreationTime
+	',TablePartyMaster.[ModifiedBy] AS TPMLastModifiedBy
+	',TablePartyMaster.[ModificationTime] AS TPMLastModificationTime
+	'FROM [Master1] As TablePartyMaster
+	'LEFT JOIN [Master1] As TablePartyGroup ON TablePartyGroup.[Code] = TablePartyMaster.[ParentGrp]
+	'LEFT JOIN [MasterAddressInfo] As TableAccountMasterDetailedInfo ON TablePartyMaster.[Code] = TableAccountMasterDetailedInfo.[MasterCode]
+	'LEFT JOIN [Master1] As TableZoneMaster ON TableZoneMaster.[Code] = TableAccountMasterDetailedInfo.[OF2]
+	'LEFT JOIN [Master1] As TableTerritoryMaster ON TableTerritoryMaster.[Code] = TableAccountMasterDetailedInfo.[OF3]
+	'LEFT JOIN [Master1] As TableCityMaster ON TableCityMaster.[Code] = TableAccountMasterDetailedInfo.[OF4]
+	'LEFT JOIN [Master1] As TableTerritoryManagerMaster ON TableTerritoryManagerMaster.[Code] = TableAccountMasterDetailedInfo.[OF5]
+	'LEFT JOIN [Master1] As TableAccountManagerMaster ON TableAccountManagerMaster.[Code] = TableAccountMasterDetailedInfo.[OF6]
+	'LEFT JOIN [Master1] As TablePartyType ON TablePartyType.[Code] = TableAccountMasterDetailedInfo.[OF7]
+	'LEFT JOIN [Master1] As TablePartyKYCStatus ON TablePartyKYCStatus.[Code] = TableAccountMasterDetailedInfo.[OF8]
+	'LEFT JOIN [Master1] As TableCityMasterAMDI ON TableCityMasterAMDI.[Code] = TableAccountMasterDetailedInfo.[CityCodeLong]
+	'LEFT JOIN [Master1] As TableStateMaster ON TableStateMaster.[Code] = TableAccountMasterDetailedInfo.[StateCodeLong]
+	'LEFT JOIN [Master1] As TableCountryMaster ON TableCountryMaster.[Code] = TableAccountMasterDetailedInfo.[CountryCodeLong]
+	'WHERE
+	'TablePartyMaster.[MasterType] = 2
+	'And TablePartyGroup.[Name] LIKE '%Sundry%'
+	'Order By TablePartyGroup.[Name], TableZoneMaster.[Name], TableTerritoryMaster.[Name],TableCityMaster.[Name],TableTerritoryManagerMaster.[Name],TableAccountManagerMaster.[Name], TablePartyMaster.[Name] ASC
+	'Go
+	'Select SQL Query
+	'NON Visible Fields
+	
+	
+	'Voucher Type
+	SelectQuery = "SELECT TablePartyMaster.[Code] As TPMCode"
+	
+	'Party Group Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TablePartyGroup.[Name] As TPGPartyGroup"
+	
+	'Zone	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF2] As TAMAIZoneCode"
+	SelectQuery = SelectQuery & ",ISNull(TableZoneMaster.[Name],'') As TZMName"
+	'Territory	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF3] As TAMAITerritoryCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableTerritoryMaster.[Name],'') As TTMName"
+	'City	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF4] As TAMAICityCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableCityMaster.[Name],'') As TCMName"
+	'Territory Manager	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF5] As TAMAITerritoryManagerCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableTerritoryManagerMaster.[Name],'') As TTMMName"
+	'Account Manager	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF6] As TAMAIAccountManagerCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableAccountManagerMaster.[Name],'') As TAMMName"
+	'Party Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TablePartyMaster.[Code] As TPMCode"
+	SelectQuery = SelectQuery & ",TablePartyMaster.[Name] As TPMPartyName"
+	'Party Code	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TablePartyMaster.[Alias] As TPMPartyCode"
+	'Print Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TablePartyMaster.[PrintName] As TPMPrintName"
+	'Contact Person	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[Contact] As TAMDIContactPerson"
+	'Mobile	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[Mobile] As TAMDIMobile"
+	'WhatsApp No	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[WhatsAppNo] As TAMDIWhatsAppNo"
+	'Telephone No	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[TelNo] As TAMDITelephoneNo"
+	'Email Address	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[Email] As TAMDIEmailAddress"
+	'Party Type	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF7] As TAMDIPartyType"
+	SelectQuery = SelectQuery & ",ISNULL(TablePartyType.[Name],'') As TPTPartyType"	
+	'KYC Status	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[OF8] As TAMDIPartyKYCStatus"
+	SelectQuery = SelectQuery & ",ISNULL(TablePartyKYCStatus.[Name],'') As TPKYCSPartyKYCStatus"	
+	'Address Line1	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[Address1] As TAMDIAddressLine1"
+	'Address Line2	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[Address2] As TAMDIAddressLine2"
+	'Address Line3	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[Address3] As TAMDIAddressLine3"
+	'Address Line4	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[Address4] As TAMDIAddressLine4"
+	'Station (Busy Field)	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[Station] As TAMDIStation"
+	'City (Busy Field)	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableCityMasterAMDI.[Name],'') As TCMAMDICity"
+	'State	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableStateMaster.[Name],'') As TCMStateName"
+	'Country	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableCountryMaster.[Name],'') As TCMCountryName"
+	'Pincode	Text	LEFT	20	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[PINCode] As TAMDIPincode"
+	'ITPAN	Text	LEFT	16	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[ITPAN] As TAMDIITPAN"
+	'Aadhaar Number	Text	LEFT	16	---	No
+	SelectQuery = SelectQuery & ",TableAccountMasterDetailedInfo.[C3] As TAMDIAadharNumber"
+	'Ac Created By	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TablePartyMaster.[CreatedBy] AS TPMCreatedBy"
+	'Ac Created On	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TablePartyMaster.[CreationTime] AS TPMCreationTime"
+	'Ac Last Modified By	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TablePartyMaster.[ModifiedBy] AS TPMLastModifiedBy"
+	'Ac Last Modified On	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TablePartyMaster.[ModificationTime] AS TPMLastModificationTime"
+	
+	'SELECT From (The Start table)
+	SelectQuery = SelectQuery & " FROM [Master1] As TablePartyMaster "
+	
+	'LEFT Join Party Group Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TablePartyGroup ON TablePartyGroup.[Code] = TablePartyMaster.[ParentGrp] "
+	
+	'LEFT Join Part Master Detailed Information Table
+	SelectQuery = SelectQuery & "LEFT JOIN [MasterAddressInfo] As TableAccountMasterDetailedInfo ON TablePartyMaster.[Code] = TableAccountMasterDetailedInfo.[MasterCode] "
+	
+	'LEFT Join Zone Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableZoneMaster ON TableZoneMaster.[Code] = TableAccountMasterDetailedInfo.[OF2] "
+	
+	'LEFT Join Territory Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableTerritoryMaster ON TableTerritoryMaster.[Code] = TableAccountMasterDetailedInfo.[OF3] "
+	
+	'LEFT Join City Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableCityMaster ON TableCityMaster.[Code] = TableAccountMasterDetailedInfo.[OF4] "
+	
+	'LEFT Join Territory Manager Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableTerritoryManagerMaster ON TableTerritoryManagerMaster.[Code] = TableAccountMasterDetailedInfo.[OF5] "
+	
+	'LEFT Join Account Manager Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableAccountManagerMaster ON TableAccountManagerMaster.[Code] = TableAccountMasterDetailedInfo.[OF6] "
+	
+	'LEFT Join Party Type Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TablePartyType ON TablePartyType.[Code] = TableAccountMasterDetailedInfo.[OF7] "
+	
+	'LEFT Join Party KYC Status Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TablePartyKYCStatus ON TablePartyKYCStatus.[Code] = TableAccountMasterDetailedInfo.[OF8] "
+	
+	'LEFT Join City (Busy Field) Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableCityMasterAMDI ON TableCityMasterAMDI.[Code] = TableAccountMasterDetailedInfo.[CityCodeLong] "
+	
+	'LEFT Join State (Busy Field) Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableStateMaster ON TableStateMaster.[Code] = TableAccountMasterDetailedInfo.[StateCodeLong] "
+	
+	'LEFT Join Country (Busy Field) Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableCountryMaster ON TableCountryMaster.[Code] = TableAccountMasterDetailedInfo.[CountryCodeLong] "
+	
+	'WHERE Clause
+	SelectQuery = SelectQuery & " WHERE TablePartyMaster.[MasterType] = (2) "
+	SelectQuery = SelectQuery & "And TablePartyGroup.[Name] LIKE '%Sundry%' "
+	'Selected Account Masters Code - Added in WHERE Clause
+	If (varAccountMasterCodes <> "" And varAccountMasterSelectionType = 1) Then
+		SelectQuery = SelectQuery & _
+		"And TablePartyMaster.[Code] IN ("&varAccountMasterCodes&") "
+	End If
+	'Selected Account Master Group Code
+	If (varAccountMasterParentGroupCode <> ""  And varAccountMasterSelectionType = 2)Then
+		SelectQuery = SelectQuery & _
+		"And TablePartyMaster.[ParentGrp] IN ("&varAccountMasterParentGroupCode&") "
+	End If
+	'Selected Account Masters Codes
+	If (varAccountMasterCodes <> "" And varAccountMasterSelectionType = 4) Then
+		SelectQuery = SelectQuery & _
+		"And TablePartyMaster.[Code] IN ("&varAccountMasterCodes&") "
+	End If
+	
+	'Selected Brokers Code - Added in WHERE Clause
+	If (varBrokerCodes <> "" And varBrokerSelectionType = 1) Then
+		SelectQuery = SelectQuery & _
+		"And TablePartyMaster.[CM3] IN ("&varBrokerCodes&") "
+	End If
+	'Selected Broker Group Code
+	'	If (varBrokerParentGroupCode <> ""  And varBrokerSelectionType = 2)Then
+	'	SelectQuery = SelectQuery & _
+	'	"And TableBroker.[ParentGrp] IN ("&varBrokerParentGroupCode&") "
+	'	End If
+	'Selected Brokers Codes
+	If (varBrokerCodes <> "" And varBrokerSelectionType = 4) Then
+		SelectQuery = SelectQuery & _
+		"And TablePartyMaster.[CM3] IN ("&varBrokerCodes&") "
+	End If
+	'
+	'Part Name Text To Search
+	If varPartyNameTextToSearch <> "" And Len(varPartyNameTextToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TablePartyMaster.[Name] LIKE '"&varPartyNameTextToSearch&"' "
+		'WriteInEventLog "varPartyNameTextToSearch "&varPartyNameTextToSearch,"Events.log"
+		'
+	End If
+	'Ignore Part Name Text To Search
+	If varIgnorePartyNameTextToSearch <> "" And Len(varIgnorePartyNameTextToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TablePartyMaster.[Name] NOT LIKE '"&varIgnorePartyNameTextToSearch&"' "
+		'WriteInEventLog "varIgnorePartyNameTextToSearch "&varIgnorePartyNameTextToSearch,"Events.log"
+		'
+	End If
+	'
+	'Selected Date Parameter'
+	If booleanFilterByDate = True Then
+		SelectQuery = SelectQuery & _
+		"And TablePartyMaster.[ModificationTime] >=" & BusyLib.GetDateQryStr(BusyRepOpt.OptStartDate) & " And TablePartyMaster.[ModificationTime] <=" & BusyLib.GetDateQryStr(BusyRepOpt.OptEndDate) &" "
+	End If
+	'Order By
+	SelectQuery = SelectQuery & "Order By TablePartyGroup.[Name], TableZoneMaster.[Name], TableTerritoryMaster.[Name],TableCityMaster.[Name],TableTerritoryManagerMaster.[Name],TableAccountManagerMaster.[Name], TablePartyMaster.[Name] ASC"
+	
+	'MsgBox(SelectQuery)
+	'WriteInEventLog SelectQuery,"Events.log"
+	'Exit Sub
+	Set RecordSet= BusyLib.GetRecordset(SelectQuery)
+	'MsgBox("Records from DB - " & RecordSet.RecordCount)
+	With RecordSet
+		If .RecordCount>0 Then
+			.MoveLast
+			.MoveFirst
+			
+			Grid_Total_Rows .RecordCount
+			
+			Do While Not .EOF
+				If m_QuitRep=True Then Exit Sub
+				Grid_New_Entry 
+				'Party Group Name	Text	LEFT	40	---	No
+				'Zone	Text	LEFT	40	---	No
+				'Territory	Text	LEFT	40	---	No
+				'City	Text	LEFT	40	---	No
+				'Territory Manager	Text	LEFT	40	---	No
+				'Account Manager	Text	LEFT	40	---	No
+				'Party Name	Text	LEFT	40	---	No
+				'Party Code	Text	LEFT	40	---	No
+				'Print Name	Text	LEFT	40	---	No
+				'Contact Person	Text	LEFT	40	---	No
+				'Mobile	Text	LEFT	40	---	No
+				'WhatsApp No	Text	LEFT	40	---	No
+				'Telephone No	Text	LEFT	40	---	No
+				'Email Address	Text	LEFT	40	---	No
+				'Party Type	Text	LEFT	40	---	No
+				'KYC Status	Text	LEFT	40	---	No
+				'Address Line1	Text	LEFT	40	---	No
+				'Address Line2	Text	LEFT	40	---	No
+				'Address Line3	Text	LEFT	40	---	No
+				'Address Line4	Text	LEFT	40	---	No
+				'Station (Busy Field)	Text	LEFT	40	---	No
+				'City (Busy Field)	Text	LEFT	40	---	No
+				'State	Text	LEFT	40	---	No
+				'Country	Text	LEFT	40	---	No
+				'Pincode	Text	LEFT	20	---	No
+				'ITPAN	Text	LEFT	16	---	No
+				'Aadhaar Number	Text	LEFT	16	---	No
+				'Ac Created By	Text	LEFT	40	---	No
+				'Ac Created On	Text	LEFT	40	---	No
+				'Ac Last Modified By	Text	LEFT	40	---	No
+				'Ac Last Modified On	Text	LEFT	40	---	No				
+				varPartyGroupName = ""
+				varZone = ""
+				varTerritory = ""
+				varCity = ""
+				varTerritoryManager = ""
+				varAccountManager = ""
+				varPartyName = ""
+				varPartyCode = ""
+				varPrintName = ""
+				varContactPerson = ""
+				varMobile = ""
+				varWhatsAppNo = ""
+				varTelephoneNo = ""
+				varEmailAddress = ""
+				varPartyType = ""
+				varKYCStatus = ""
+				varAddressLine1 = ""
+				varAddressLine2 = ""
+				varAddressLine3 = ""
+				varAddressLine4 = ""
+				varStationBusyField = ""
+				varCityBusyField = ""
+				varState = ""
+				varCountry = ""
+				varPincode = ""
+				varPAN = ""
+				varAadhaarNumber = ""
+				varAcCreatedBy = ""
+				varAcCreatedOn = ""
+				varAcLastModifiedBy = ""
+				varAcLastModifiedOn = ""
+				'NON Visible Fields
+			
+				'Update the NON Visible Fields Data
+				
+				'Party Group Name	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TPGPartyGroup").Value
+				
+				'Zone	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TAMAIZoneCode").Value)					
+				Grid_Throw_Data .Fields("TZMName").Value
+				
+				'Territory	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TAMAITerritoryCode").Value)					
+				Grid_Throw_Data .Fields("TTMName").Value
+				
+				'City	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TAMAICityCode").Value)					
+				Grid_Throw_Data .Fields("TCMName").Value
+				
+				'Territory Manager	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TAMAITerritoryManagerCode").Value)					
+				Grid_Throw_Data .Fields("TTMMName").Value
+				
+				'Account Manager	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TAMAIAccountManagerCode").Value)					
+				Grid_Throw_Data .Fields("TAMMName").Value
+				
+				'Party Name	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TPMCode").Value)					
+				Grid_Throw_Data .Fields("TPMPartyName").Value
+				
+				'Party Code	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TPMPartyCode").Value
+				
+				'Print Name	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TPMPrintName").Value
+				
+				'Contact Person	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TAMDIContactPerson").Value
+				
+				'Mobile	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TAMDIMobile").Value
+				
+				'WhatsApp No	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TAMDIWhatsAppNo").Value
+				
+				'Telephone No	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TAMDITelephoneNo").Value
+				
+				'Email Address	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TAMDIEmailAddress").Value
+				
+				'Party Type	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TAMDIPartyType").Value)					
+				Grid_Throw_Data .Fields("TPTPartyType").Value
+				
+				'KYC Status	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TAMDIPartyKYCStatus").Value)					
+				Grid_Throw_Data .Fields("TPKYCSPartyKYCStatus").Value
+				
+				'Address Line1	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TAMDIAddressLine1").Value
+				
+				'Address Line2	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TAMDIAddressLine2").Value
+				
+				'Address Line3	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TAMDIAddressLine3").Value
+				
+				'Address Line4	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TAMDIAddressLine4").Value
+				
+				'Station (Busy Field)	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TAMDIStation").Value
+				
+				'City (Busy Field)	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TCMAMDICity").Value
+				
+				'State	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TCMStateName").Value
+				
+				'Country	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TCMCountryName").Value
+				
+				'Pincode	Text	LEFT	20	---	No
+				Grid_Throw_Data .Fields("TAMDIPincode").Value
+				
+				'ITPAN	Text	LEFT	16	---	No
+				Grid_Throw_Data .Fields("TAMDIITPAN").Value
+				
+				'Aadhaar Number	Text	LEFT	16	---	No
+				Grid_Throw_Data .Fields("TAMDIAadharNumber").Value
+				
+				'Ac Created By	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TPMCreatedBy").Value
+				
+				'Ac Created On	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TPMCreationTime").Value
+				
+				'Ac Last Modified By	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TPMLastModifiedBy").Value
+				
+				'Ac Last Modified On	Text	LEFT	40	---	No				
+				Grid_Throw_Data .Fields("TPMLastModificationTime").Value
+				
+				
+				Grid_Next_Row .Fields("TPMCode").Value
+				.MoveNext
+			Loop
+		End If
+	End With
+	
+	
+End Sub
+
+
+Public Sub OnEnterChs(p_OnEnterInfo)
+	Dim varPartyAccountCode
+	varPartyAccountCode = p_OnEnterInfo
+	If varPartyAccountCode <> "" Then
+		OnEnter_Modify_Master BusyConst.ACC_MAST,varPartyAccountCode
+	End If	
+End Sub
+
+
+Public Sub UpdateFieldsInfo()
+	'BusyGrid.AddTopLabel1 "Top Label 1"
+	BusyGrid.AddTopLabel2  CTBCRByPrachaitVersion
+	BusyGrid.AddInfoLabel1 CTBCRResponsbilePersonForReport
+	BusyGrid.AddInfoLabel2 CTBCRByDevelopedPrachaitContactInformation
+	BusyGrid.AddInfoLabel3 CTBCRTodo
+	BusyGrid.AddInfoLabel4 "Status : ... Keep working !"
+End Sub
+
+
+Public Sub UpdateObjects(CEvents)
+	Set BusyLib = CreateObject("Busy2L21.CFixedInterface")
+	Set BusyConst = CreateObject("BusyCSC21.CGlobalConstants")
+	Set BusyRepOpt = CreateObject("Busy2L21.CRepOptions")
+	Set BusyCompConfig = CreateObject("Busy2L21.CCompany")
+	
+	Set BusyGrid = CEvents
+	Set BusyOnEnter = CEvents
+	
+	BusyUpdateRepOpt BusyRepOpt
+	BusyUpdateCompConfig BusyCompConfig
+End Sub
+
+
+Public Sub QuitRep(p_QuitVal)
+	m_QuitRep = p_QuitVal
+End Sub
+
+
+Public Sub Grid_Throw_Data(p_Data)
+	BusyGrid.ThrowData p_Data
+End Sub
+
+
+Public Sub Grid_Next_Row(p_OnEnterInfo)
+	BusyGrid.NextRow p_OnEnterInfo
+End Sub
+
+
+Public Sub Grid_Next_Row_With_Special_Effect(p_OnEnterInfo,p_SEConst)
+	BusyGrid.NextRow p_OnEnterInfo, p_SEConst
+End Sub
+
+
+Public Sub Grid_New_Entry()
+	BusyGrid.NewEntry
+End Sub
+
+
+Public Sub Grid_Total_Rows(p_TotalRows)
+	BusyGrid.TotalRows p_TotalRows
+End Sub
+
+
+Public Sub BusyUpdateCompConfig(p_Obj)
+	BusyGrid.UpdateCompConfig p_Obj
+End Sub
+
+
+Public Sub BusyUpdateRepOpt(p_Obj)
+	BusyGrid.UpdateRepOpt p_Obj
+End Sub
+
+
+Public Sub UpdateFormLabels()
+	
+End Sub
+
+
+Public Sub AddTopLabel1(p_Label)
+	BusyGrid.AddTopLabel1 p_Label 
+End Sub 
+
+
+Public Sub AddTopLabel2(p_Label)
+	BusyGrid.AddTopLabel2 p_Label 
+End Sub 
+
+
+Public Sub AddInfoLabel1(p_Label)
+	BusyGrid.AddInfoLabel1 p_Label 
+End Sub 
+
+
+Public Sub AddInfoLabel2(p_Label)
+	BusyGrid.AddInfoLabel2 p_Label 
+End Sub 
+
+
+Public Sub AddInfoLabel3(p_Label)
+	BusyGrid.AddInfoLabel3 p_Label 
+End Sub 
+
+
+Public Sub AddInfoLabel4(p_Label)
+	BusyGrid.AddInfoLabel4 p_Label 
+End Sub 
+
+
+Public Sub BusySetRepOpt(p_Obj)
+	BusyGrid.SetRepOpt p_Obj
+End Sub
+
+
+Public Sub BusyAddNewColumn(p_ColumnName, p_ColumnDataType, p_ColumnAlignment, p_ColumnMaxChar, p_ColumnMaxDecimal, p_ColumnShowTotal)
+	BusyGrid.AddNewColumn p_ColumnName, p_ColumnDataType, p_ColumnAlignment, p_ColumnMaxChar, p_ColumnMaxDecimal, p_ColumnShowTotal
+End Sub
+
+
+Public Sub OnEnter_Modify_Master(p_MasterType, p_MasterCode)
+	BusyOnEnter.ModifyMaster p_MasterType,p_MasterCode
+End Sub
+
+
+Public Sub OnEnter_Modify_Voucher(p_VchCode)
+	BusyOnEnter.ModifyVoucher p_VchCode
+End Sub
+
+
+Public Sub OnEnter_Acc_Ledger(p_AccCode, p_StartDate, p_EndDate)
+	BusyOnEnter.ShowAccLedger p_AccCode, p_StartDate, p_EndDate 
+End Sub
+
+
+Public Sub OnEnter_Acc_Ledger_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowAccLedgerWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Item_Ledger(p_ItemCode, p_MCCode, p_StartDate, p_EndDate, p_ShowVal, p_IUT)
+	BusyOnEnter.ShowItemMCLedger p_ItemCode, p_MCCode, p_StartDate, p_EndDate, p_ShowVal, p_IUT
+End Sub
+
+
+Public Sub OnEnter_Item_Ledger_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowItemMCLedgerWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Vch_List(p_VchType, p_StartDate, p_EndDate, p_VchSeriesCode)
+	BusyOnEnter.ShowVchsList p_VchType, p_StartDate, p_EndDate, p_VchSeriesCode
+End Sub
+
+
+Public Sub OnEnter_Vch_List_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowVchsListWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Custom_Report(p_FormatName, p_RepOptObj)
+	BusyOnEnter.ShowCustomReport p_FormatName, p_RepOptObj
+End Sub
+
+
+Public Function WriteInEventLog(LogText,LogFileName)
+	dtmThisDay = Day(Date)
+	dtmThisMonth = Month(Date)
+	dtmThisYear = Year(Date)
+	dtmThisHour = Hour(Time)
+	dtmThisMinute = Minute(Time)
+	dtmThisSecond = Second(Time)
+	
+	If LogFileName = "" Then
+		LogFileName = "Events.log"
+	End If 
+	Const ForAppending = 8
+	Set objFSO = CreateObject("Scripting.FileSystemObject")
+	
+	Set objTextFile = objFSO.OpenTextFile _
+	(LogFileName, ForAppending, True)
+	objTextFile.Write dtmThisYear&":"& dtmThisMonth&":"& dtmThisDay&" " & dtmThisHour&":"&dtmThisMinute&":"&dtmThisSecond& " - "  & LogText & vbCrLf
+	objTextFile.Close
+	WriteInEventLog = 1
+	'strBackupName = dtmThisYear & "_" & dtmThisMonth & "_" & dtmThisDay
+End Function

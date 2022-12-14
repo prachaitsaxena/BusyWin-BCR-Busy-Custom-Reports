@@ -1,0 +1,1051 @@
+Option Explicit
+
+Const CTBCRByPrachaitVersion = "Busy Custom Report - BCR PS_88InterBranchStk - Version PS20221213-1030"
+Const CTBCRByDevelopedPrachaitContactInformation = "Developed By Prachait Saxena, +919450901908, info@prachait.com"
+Const CTBCRScriptFileName = "PS_88InterBranchStk.vbs"
+Const CTBCRScriptLogFileName = "PS_88InterBranchStk.txt"
+'
+'
+'The BCR Keep track of current sale, expected stock, current stock, excess stock
+'The BCR 
+'
+'
+'Current Filters in use
+'Item, Sale Date, Ignore Sale Party Name, Show only Any MC Overstock Items, Ignore Block Items, Ignore Deactivate Items, Reset Column Width in Sheet
+'
+'Todo:
+'1. 
+'
+'2. 
+Const CTBCRTodo = "Todo: "
+Const CTBCRResponsbilePersonForReport = "To be reported by Tanisha (Stock Coordination) to management"
+
+
+Dim objFSO
+Dim objTextFile
+
+Dim BusyLib
+Dim BusyGrid
+Dim BusyOnEnter
+Dim BusyConst
+Dim BusyRepOpt
+Dim BusyCompConfig
+Dim m_QuitRep
+
+Dim varErrorLogFile
+Dim varErrorMessage
+Dim varErrorStatus
+
+Dim	dtmThisDay
+Dim	dtmThisMonth
+Dim	dtmThisYear
+Dim dtmThisHour
+Dim dtmThisMinute
+Dim dtmThisSecond
+
+
+Public Sub GenerateRep()
+	
+	On Error Resume Next
+	
+	Dim SelectQuery
+	Dim RecordSet
+	Dim OldVchCode 
+	
+	Dim varItemName
+	Dim varItemCode
+	Dim varBusyGroupName
+	Dim varParentGroupName
+	Dim varGroupName
+	Dim varManufacturingBrand
+	Dim varConsumerBrand
+	Dim var1111LKOSelectedDateSale
+	Dim var1111LKOMaximumLevelStockQty
+	Dim var1111LKOReorderLevelStockQty
+	Dim var1111LKOCurrentStock
+	Dim var1111LKOExcessorShortageStock
+	Dim var1111LKORecommendationStockNeeded
+	Dim var2111KNPSelectedDateSale
+	Dim var2111KNPMaximumLevelStockQty
+	Dim var2111KNPReorderLevelStockQty
+	Dim var2111KNPCurrentStock
+	Dim var2111KNPExcessorShortageStock
+	Dim var2111KNPRecommendationStockNeeded
+	Dim var3111DLISelectedDateSale
+	Dim var3111DLIMaximumLevelStockQty
+	Dim var3111DLIReorderLevelStockQty
+	Dim var3111DLICurrentStock
+	Dim var3111DLIExcessorShortageStock
+	Dim var3111DLIRecommendationStockNeeded
+	Dim varTotalSelectedDateSale
+	Dim varTotalMaximumLevelStockQty
+	Dim varTotalReorderLevelStockQty
+	Dim varTotalCurrentStock
+	Dim varTotalExcessorShortageStock
+	Dim varTotalRecommendationStockNeeded
+	Dim varLKOKNPRecommendedTrf
+	Dim varLKODLIRecommendedTrf
+	Dim varKNPLKORecommendedTrf
+	Dim varKNPDLIRecommendedTrf
+	Dim varDLILKORecommendedTrf
+	Dim varDLIKNPRecommendedTrf
+	Dim varLKORecommendedPurchase
+	Dim varKNPRecommendedPurchase
+	Dim varDLIRecommendedPurchase
+	Dim varBlockedStatus
+	Dim varDeactivatedStatus
+	Dim varRemarks	
+	Dim varPartyNameTextToSearch
+	
+	
+	'ITEM_RANGE	Select Item Master Range
+	'START_DATE	Sale Added Between Starting Date
+	'END_DATE	Sale Added Between Ending Date
+	'TEXT1	Ignore Sale Party Name(s) (Ex. %Lapking%)
+	'BOOL1	Show Only Any MC Overstock Items
+	'BOOL2	Ignore Blocked Items
+	'BOOL3	Ignore Deactivated Items
+	'BOOL4	Reset Column Width in Sheet
+	
+	OldVchCode=0
+	
+	Dim varCounter
+	
+	'Setup Filters from the Report Options
+	'ITEM_RANGE	Select Item Master Range
+	
+	'Filter For Item Master
+	Dim varItemMasterSelectionType
+	Dim varItemMasterCodes
+	Dim varItemMasterParentGroupCode
+	Dim varItemMasterSelected
+	Dim varItemMasterSelectedCodes
+	
+	varItemMasterSelectionType = BusyRepOpt.OptItemRange
+	If BusyRepOpt.OptItemRange = 1  Then	'One Item Selected
+		varItemMasterCodes = BusyRepOpt.OptItemCode
+		'WriteInEventLog "OptItemCode "&BusyRepOpt.OptItemCode,CTBCRScriptLogFileName 'For Single Selection Only
+	ElseIf BusyRepOpt.OptItemRange = 2  Then	'Item Group Selected
+		varItemMasterParentGroupCode = BusyRepOpt.OptIGrpCode
+		'WriteInEventLog "OptAGRPCode "&BusyRepOpt.OptIGrpCode,CTBCRScriptLogFileName			
+	ElseIf BusyRepOpt.OptItemRange = 3  Then	'All Items
+		
+	ElseIf BusyRepOpt.OptItemRange = 4  Then	'Selected Items	
+		Set varItemMasterSelectedCodes = BusyRepOpt.OptItemRangeSelectedCol
+		If varItemMasterSelectedCodes.Count > 0 Then
+			For varCounter = 1 To varItemMasterSelectedCodes.Count
+				varItemMasterCodes =  varItemMasterCodes & BusyLib.GetItemFromCol(varItemMasterSelectedCodes, varCounter) & "," 
+			Next 
+		End If 
+		varItemMasterCodes =  Left(varItemMasterCodes,Len(varItemMasterCodes)-1)  
+		If Len(varItemMasterCodes)=0 Then varItemMasterCodes="" 
+		varCounter = 0
+		'WriteInEventLog "varItemMasterCodes "&varItemMasterCodes,CTBCRScriptLogFileName 'For Single Selection Only
+	End If
+	
+	'Filter Ignore Party Name with Text
+	Dim varIgnoreSalePartyNameTextToSearch
+	varIgnoreSalePartyNameTextToSearch = BusyRepOpt.OptText1
+	
+	'BOOL1	Show Only Any MC Overstock Items
+	Dim booleanShowOnlyAnyMCOverstockItems
+	booleanShowOnlyAnyMCOverstockItems = BusyRepOpt.OptBool1
+	
+	'BOOL1	Ignore Blocked Items
+	Dim booleanIgnoreBlockedItems
+	booleanIgnoreBlockedItems = BusyRepOpt.OptBool2
+	
+	'BOOL2	Ignore Deactivated Items
+	Dim booleanIgnoreDeactivatedItems
+	booleanIgnoreDeactivatedItems = BusyRepOpt.OptBool3
+	
+	'BOOL3	Reset Column Width in Sheet
+	Dim BooleanResetColumnWidthinSheet
+	BooleanResetColumnWidthinSheet = BusyRepOpt.OptBool4
+	
+	'Item Name	Text	LEFT	40	---	No
+	'Item Code	Text	LEFT	14	---	No
+	'Busy Group Name	Text	LEFT	40	---	No
+	'Parent Group Name	Text	LEFT	40	---	No
+	'Group Name	Text	LEFT	40	---	No
+	'Manufacturing Brand	Text	LEFT	40	---	No
+	'Consumer Brand	Text	LEFT	40	---	No
+	'1111 LKO - Selected Date Sale	Numeric	RIGHT	16	0	Yes
+	'1111 LKO - Maximum Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	'1111 LKO - Reorder Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	'1111 LKO - Current Stock	Numeric	RIGHT	16	0	Yes
+	'1111 LKO - Excess or Shortage Stock	Numeric	RIGHT	16	0	Yes
+	'1111 LKO - Recommendation Stock Needed	Numeric	RIGHT	16	0	Yes
+	'2111 KNP - Selected Date Sale	Numeric	RIGHT	16	0	Yes
+	'2111 KNP - Maximum Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	'2111 KNP - Reorder Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	'2111 KNP - Current Stock	Numeric	RIGHT	16	0	Yes
+	'2111 KNP - Excess or Shortage Stock	Numeric	RIGHT	16	0	Yes
+	'2111 KNP - Recommendation Stock Needed	Numeric	RIGHT	16	0	Yes
+	'3111 DLI - Selected Date Sale	Numeric	RIGHT	16	0	Yes
+	'3111 DLI - Maximum Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	'3111 DLI - Reorder Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	'3111 DLI - Current Stock	Numeric	RIGHT	16	0	Yes
+	'3111 DLI - Excess or Shortage Stock	Numeric	RIGHT	16	0	Yes
+	'3111 DLI - Recommendation Stock Needed	Numeric	RIGHT	16	0	Yes
+	'Total - Selected Date Sale	Numeric	RIGHT	16	0	Yes
+	'Total - Maximum Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	'Total - Reorder Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	'Total - Current Stock	Numeric	RIGHT	16	0	Yes
+	'Total - Excess or Shortage Stock	Numeric	RIGHT	16	0	Yes
+	'Total - Recommendation Stock Needed	Numeric	RIGHT	16	0	Yes
+	'LKO->KNP Recommended Trf	Numeric	RIGHT	16	0	Yes
+	'LKO->DLI Recommended Trf	Numeric	RIGHT	16	0	Yes
+	'KNP->LKO Recommended Trf	Numeric	RIGHT	16	0	Yes
+	'KNP->DLI Recommended Trf	Numeric	RIGHT	16	0	Yes
+	'DLI->LKO Recommended Trf	Numeric	RIGHT	16	0	Yes
+	'DLI->KNP Recommended Trf	Numeric	RIGHT	16	0	Yes
+	'LKO Recommended Purchase	Numeric	RIGHT	16	0	Yes
+	'KNP Recommended Purchase	Numeric	RIGHT	16	0	Yes
+	'DLI Recommended Purchase	Numeric	RIGHT	16	0	Yes
+	'Blocked Status	Text	CENTER	12	---	No
+	'Deactivated Status	Text	CENTER	12	---	No
+	'Remarks	Text	LEFT	40	---	No
+	
+	
+	'Select SQL Query
+	'NON Visible Fields
+	'Voucher Type
+	SelectQuery = "SELECT TableItemMaster.[Code] As ITMItemCode"
+	
+	'Item Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableItemMaster.[Name] As TIMName"
+	
+	'Item Code	Text	LEFT	14	---	No
+	SelectQuery = SelectQuery & ",TableItemMaster.[Alias] As TIMAlias"
+	'Busy Group Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableItemMaster.[ParentGrp] As TIMBusyParentGroupCode"
+	SelectQuery = SelectQuery & ",TableBusyGroupNameMaster.[Name] As TBPGNMName"
+	'Parent Group Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableItemMasterDetailedInfo.[OF2],'') As TIMAIParentGroupCode"	
+	SelectQuery = SelectQuery & ",ISNULL(TableParentGroupNameMaster.[Name],'') As TPGNMName"				
+	'Group Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableItemMasterDetailedInfo.[OF3],'') As TIMAIGroupCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableGroupNameMaster.[Name],'') As TGNMName"		
+	'Manufacturing Brand	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableItemMasterDetailedInfo.[OF4],'') As TIMAIManufacturingBrandCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableManufacturingBrandMaster.[Name],'') As TMBMName"
+	'Consumer Brand	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableItemMasterDetailedInfo.[OF5],'') As TIMAIConsumberBrandCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableConsumerBrandMaster.[Name],'') As TCBMName"
+	
+	
+	'1111 LKO - Selected Date Sale	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ISNULL(TableItemSaleDetailsInformation1110LKO.[TISDSelectedDaysSaleQuantity],0) As TISDISelectedDaysSaleQuantity1110LKO"
+	'1111 LKO - Maximum Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ROUND(ISNULL(TableItemMasterSupport1110LKO.[D3],0),0) As var1110LKOMaximumLevelQuantity"
+	'1111 LKO - Reorder Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ROUND(ISNULL(TableItemMasterSupport1110LKO.[D2],0),0) As var1110LKOReorderLevelQuantity"
+	'1111 LKO - Current Stock	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ISNULL(TableItemCurrentStockInformation1110LKO.[TISDCurrentStock],0) As TICSI1110LKOCurrentStockQty"
+	'1111 LKO - Excess or Shortage Stock	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ROUND(ISNULL(TableItemCurrentStockInformation1110LKO.[TISDCurrentStock],0) - ISNULL(TableItemMasterSupport1110LKO.[D2],0),0) As var1110LKOShortAndExcessStock"
+	'1111 LKO - Recommendation Stock Needed	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",(ROUND(ISNULL(TableItemMasterSupport1110LKO.[D3],0),0) - ROUND(ISNULL(TableItemMasterSupport1110LKO.[D2],0),0) - ISNULL(TableItemCurrentStockInformation1110LKO.[TISDCurrentStock],0)) As var1111LKORecommendationStockNeeded"
+	'2111 KNP - Selected Date Sale	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ISNULL(TableItemSaleDetailsInformation2110KNP.[TISDSelectedDaysSaleQuantity],0) As TISDISelectedDaysSaleQuantity2110KNP"
+	'2111 KNP - Maximum Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ROUND(ISNULL(TableItemMasterSupport2110KNP.[D3],0),0) As var2110KNPMaximumLevelQuantity"
+	'2111 KNP - Reorder Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ROUND(ISNULL(TableItemMasterSupport2110KNP.[D2],0),0) As var2110KNPReorderLevelQuantity"
+	'2111 KNP - Current Stock	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ISNULL(TableItemCurrentStockInformation2110KNP.[TISDCurrentStock],0) As TICSI2110KNPCurrentStockQty"
+	'2111 KNP - Excess or Shortage Stock	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ROUND(ISNULL(TableItemCurrentStockInformation2110KNP.[TISDCurrentStock],0) - ISNULL(TableItemMasterSupport2110KNP.[D2],0),0) As var2110KNPShortAndExcessStock"
+	'2111 KNP - Recommendation Stock Needed	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",(ROUND(ISNULL(TableItemMasterSupport2110KNP.[D3],0),0) - ROUND(ISNULL(TableItemMasterSupport2110KNP.[D2],0),0) - ISNULL(TableItemCurrentStockInformation2110KNP.[TISDCurrentStock],0)) As var2111KNPRecommendationStockNeeded"
+	'3111 DLI - Selected Date Sale	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ISNULL(TableItemSaleDetailsInformation3110DLI.[TISDSelectedDaysSaleQuantity],0) As TISDISelectedDaysSaleQuantity3110DLI"
+	'3111 DLI - Maximum Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ROUND(ISNULL(TableItemMasterSupport3110DLI.[D3],0),0) As var3110DLIMaximumLevelQuantity"
+	'3111 DLI - Reorder Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ROUND(ISNULL(TableItemMasterSupport3110DLI.[D2],0),0) As var3110DLIReorderLevelQuantity"
+	'3111 DLI - Current Stock	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ISNULL(TableItemCurrentStockInformation3110DLI.[TISDCurrentStock],0) As TICSI3110DLICurrentStockQty"
+	'3111 DLI - Excess or Shortage Stock	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ROUND(ISNULL(TableItemCurrentStockInformation3110DLI.[TISDCurrentStock],0) - ISNULL(TableItemMasterSupport3110DLI.[D2],0),0) As var3110DLIShortAndExcessStock"
+	'3111 DLI - Recommendation Stock Needed	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",(ROUND(ISNULL(TableItemMasterSupport3110DLI.[D3],0),0) - ROUND(ISNULL(TableItemMasterSupport3110DLI.[D2],0),0) - ISNULL(TableItemCurrentStockInformation3110DLI.[TISDCurrentStock],0)) As var3111DLIRecommendationStockNeeded"
+	'Total - Selected Date Sale	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",(ISNULL(TableItemSaleDetailsInformation1110LKO.[TISDSelectedDaysSaleQuantity],0) +  ISNULL(TableItemSaleDetailsInformation2110KNP.[TISDSelectedDaysSaleQuantity],0) + ISNULL(TableItemSaleDetailsInformation3110DLI.[TISDSelectedDaysSaleQuantity],0)) As varTotalSelectedDaysSale"	
+	'Total - Maximum Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ROUND(ISNULL(TableItemMasterSupport1110LKO.[D3],0)+ ISNULL(TableItemMasterSupport2110KNP.[D3],0)+ISNULL(TableItemMasterSupport3110DLI.[D3],0),0) As varTotalMaximumLevelQuantity"
+	'Total - Reorder Level Stock Qty	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ROUND(ISNULL(TableItemMasterSupport1110LKO.[D2],0)+ISNULL(TableItemMasterSupport2110KNP.[D2],0)+ISNULL(TableItemMasterSupport3110DLI.[D2],0),0) As varTotalReorderLevelQuantity"
+	'Total - Current Stock	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",(ISNULL(TableItemCurrentStockInformation1110LKO.[TISDCurrentStock],0)+ISNULL(TableItemCurrentStockInformation2110KNP.[TISDCurrentStock],0)+ISNULL(TableItemCurrentStockInformation3110DLI.[TISDCurrentStock],0)) As varTotalCurrentStock"
+	'Total - Excess or Shortage Stock	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",ROUND((ISNULL(TableItemCurrentStockInformation1110LKO.[TISDCurrentStock],0)+ISNULL(TableItemCurrentStockInformation2110KNP.[TISDCurrentStock],0)+ISNULL(TableItemCurrentStockInformation3110DLI.[TISDCurrentStock],0))-(ISNULL(TableItemMasterSupport1110LKO.[D2],0)+ISNULL(TableItemMasterSupport2110KNP.[D2],0)+ISNULL(TableItemMasterSupport3110DLI.[D2],0)),0) As varTotalShortAndExcessStock"
+	'Total - Recommendation Stock Needed	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",(ROUND(ISNULL(TableItemMasterSupport1110LKO.[D3],0) + ISNULL(TableItemMasterSupport2110KNP.[D3],0)+ISNULL(TableItemMasterSupport3110DLI.[D3],0),0) - " & _
+	"ROUND(ISNULL(TableItemMasterSupport1110LKO.[D2],0)+ISNULL(TableItemMasterSupport2110KNP.[D2],0)+ISNULL(TableItemMasterSupport3110DLI.[D2],0),0) - " & _ 
+	"(ISNULL(TableItemCurrentStockInformation1110LKO.[TISDCurrentStock],0)+ISNULL(TableItemCurrentStockInformation2110KNP.[TISDCurrentStock],0)+ISNULL(TableItemCurrentStockInformation3110DLI.[TISDCurrentStock],0))) " & _
+	"As varTotalRecommendationStockNeeded"
+	'LKO->KNP Recommended Trf	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",'' As varLKOKNPRecommendedTrf"
+	'LKO->DLI Recommended Trf	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",'' As varLKODLIRecommendedTrf"
+	'KNP->LKO Recommended Trf	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",'' As varKNPLKORecommendedTrf"
+	'KNP->DLI Recommended Trf	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",'' As varKNPDLIRecommendedTrf"
+	'DLI->LKO Recommended Trf	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",'' As varDLILKORecommendedTrf"
+	'DLI->KNP Recommended Trf	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",'' As varDLIKNPRecommendedTrf"
+	'LKO Recommended Purchase	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",'' As varLKORecommendedPurchase"
+	'KNP Recommended Purchase	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",'' As varKNPRecommendedPurchase"
+	'DLI Recommended Purchase	Numeric	RIGHT	16	0	Yes
+	SelectQuery = SelectQuery & ",'' As varDLIRecommendedPurchase"	
+	
+	'Blocked Status	Text	CENTER	12	---	No
+	SelectQuery = SelectQuery & ",IIF(TableItemMaster.[BlockedMaster] = 1,'Blocked','Active') As TIMBlockedStatus"
+	
+	'Deactivated Status	Text	CENTER	12	---	No									
+	SelectQuery = SelectQuery & ",IIF(TableItemMaster.[DeactiveMaster] = 1,'Deactivated','Active') As TIMBDeactivatedStatus"
+	
+	'Remarks	Text	LEFT	40	---	No	
+	
+	'SELECT From (The Start table)
+	SelectQuery = SelectQuery & " FROM [Master1] As TableItemMaster "
+	
+	'LEFT Join Item Master Detailed Information Table
+	SelectQuery = SelectQuery & "LEFT JOIN [MasterAddressInfo] As TableItemMasterDetailedInfo ON TableItemMaster.[Code] = TableItemMasterDetailedInfo.[MasterCode] "
+	
+	'LEFT Join Busy Group Name Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableBusyGroupNameMaster ON TableBusyGroupNameMaster.[Code] = TableItemMaster.[ParentGrp] "
+	
+	'LEFT Join Parent Group Name Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableParentGroupNameMaster ON TableParentGroupNameMaster.[Code] = TableItemMasterDetailedInfo.[OF2] "
+	
+	'LEFT Join Group Name Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableGroupNameMaster ON TableGroupNameMaster.[Code] = TableItemMasterDetailedInfo.[OF3] "
+	
+	'LEFT Join Manufacturing Brand Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableManufacturingBrandMaster ON TableManufacturingBrandMaster.[Code] = TableItemMasterDetailedInfo.[OF4] "
+	
+	'LEFT Join Consumer Brand Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableConsumerBrandMaster ON TableConsumerBrandMaster.[Code] = TableItemMasterDetailedInfo.[OF5] "
+	
+	'LEFT Join Opening Price Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Tran4] As TableItemOpeningPrice ON TableItemOpeningPrice.[MasterCode1] = TableItemMaster.[Code] " & _
+	"AND TableItemOpeningPrice.[BranchCode] = 0 "	
+	
+	'--- Sale: 9, Sale Return: 3
+	SelectQuery = SelectQuery & "OUTER APPLY (" & _
+	"SELECT (0 - ISNULL(SUM(TableItemSaleDetails.[Value1]),0)) As TISDSelectedDaysSaleQuantity " & _
+	"From [Tran2] As TableItemSaleDetails "
+	
+	If varIgnoreSalePartyNameTextToSearch <> "" And Len(varIgnoreSalePartyNameTextToSearch) > 0 Then
+		'LEFT Join Party Master Table
+		SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TablePartyMaster ON TableItemSaleDetails.[CM1] = TablePartyMaster.[Code] "
+	End If
+	
+	SelectQuery = SelectQuery & " WHERE " & _
+	"TableItemSaleDetails.[RecType] = 2 " & _
+	"AND TableItemSaleDetails.[MasterCode1] = TableItemMaster.[Code] " & _
+	"And TableItemSaleDetails.[VchType] IN (9, 3) " & _ 
+	"AND TableItemSaleDetails.[MasterCode2] IN (15557, 16077) " 
+	
+	'Selected Date Parameter'	
+	SelectQuery = SelectQuery & _
+	"And TableItemSaleDetails.[Date] >=" & BusyLib.GetDateQryStr(BusyRepOpt.OptStartDate) & " And TableItemSaleDetails.[Date] <=" & BusyLib.GetDateQryStr(BusyRepOpt.OptEndDate) &" "
+	
+	'Ignore Part Name Text To Search
+	If varIgnoreSalePartyNameTextToSearch <> "" And Len(varIgnoreSalePartyNameTextToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TablePartyMaster.[Name] NOT LIKE '"&varIgnoreSalePartyNameTextToSearch&"' "
+		'WriteInEventLog "varIgnoreSalePartyNameTextToSearch "&varIgnoreSalePartyNameTextToSearch,CTBCRScriptLogFileName		
+		
+	End If	
+	SelectQuery = SelectQuery & _
+	") AS TableItemSaleDetailsInformation1110LKO "
+	
+	SelectQuery = SelectQuery & "LEFT JOIN [MasterSupport] As TableItemMasterSupport1110LKO " & _
+	"ON TableItemMasterSupport1110LKO.[MasterCode] = TableItemMaster.[Code] " & _
+	"AND TableItemMasterSupport1110LKO.[CM1] IN (15557) "
+	
+	'--- Sale: 9, Sale Return: 3, Purchase:2, Purchase Return:10
+	
+	SelectQuery = SelectQuery & "OUTER APPLY (" & _
+	"SELECT ISNULL(SUM(TableItemOpeningDetails.[D1]),0) + ISNULL(SUM(TableTransactionStockQty.[Value1]),0) As TISDCurrentStock " & _
+	"From [Tran2] As TableTransactionStockQty " & _
+	"LEFT JOIN [Tran4] As TableItemOpeningDetails ON TableItemOpeningDetails.[MasterCode1] = TableTransactionStockQty.[MasterCode1] " & _
+	"AND TableItemOpeningDetails.[MasterCode2] IN (15557, 16077) "
+	
+	SelectQuery = SelectQuery & "WHERE " & _
+	"TableTransactionStockQty.[RecType] = 2 " & _
+	"AND TableTransactionStockQty.[MasterCode1] = TableItemMaster.[Code] " & _
+	"And TableTransactionStockQty.[VchType] IN (9, 3, 2, 10) " & _ 
+	"AND TableTransactionStockQty.[MasterCode2] IN (15557, 16077)" & _
+	") AS TableItemCurrentStockInformation1110LKO "
+	
+	'--- Sale: 9, Sale Return: 3
+	SelectQuery = SelectQuery & "OUTER APPLY (" & _
+	"SELECT (0 - ISNULL(SUM(TableItemSaleDetails.[Value1]),0)) As TISDSelectedDaysSaleQuantity " & _
+	"From [Tran2] As TableItemSaleDetails "
+	
+	If varIgnoreSalePartyNameTextToSearch <> "" And Len(varIgnoreSalePartyNameTextToSearch) > 0 Then
+		'LEFT Join Party Master Table
+		SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TablePartyMaster ON TableItemSaleDetails.[CM1] = TablePartyMaster.[Code] "
+	End If
+	
+	SelectQuery = SelectQuery & " WHERE " & _
+	"TableItemSaleDetails.[RecType] = 2 " & _
+	"AND TableItemSaleDetails.[MasterCode1] = TableItemMaster.[Code] " & _
+	"And TableItemSaleDetails.[VchType] IN (9, 3) " & _ 
+	"AND TableItemSaleDetails.[MasterCode2] IN (17357, 17361) "
+	
+	'Selected Date Parameter'	
+	SelectQuery = SelectQuery & _
+	"And TableItemSaleDetails.[Date] >=" & BusyLib.GetDateQryStr(BusyRepOpt.OptStartDate) & " And TableItemSaleDetails.[Date] <=" & BusyLib.GetDateQryStr(BusyRepOpt.OptEndDate) &" "
+	
+	'Ignore Part Name Text To Search
+	If varIgnoreSalePartyNameTextToSearch <> "" And Len(varIgnoreSalePartyNameTextToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TablePartyMaster.[Name] NOT LIKE '"&varIgnoreSalePartyNameTextToSearch&"' "
+		'WriteInEventLog "varIgnoreSalePartyNameTextToSearch "&varIgnoreSalePartyNameTextToSearch,CTBCRScriptLogFileName		
+		
+	End If
+	
+	SelectQuery = SelectQuery & _
+	") AS TableItemSaleDetailsInformation2110KNP "	
+	
+	
+	SelectQuery = SelectQuery & "LEFT JOIN [MasterSupport] As TableItemMasterSupport2110KNP " & _
+	"ON TableItemMasterSupport2110KNP.[MasterCode] = TableItemMaster.[Code] " & _
+	"AND TableItemMasterSupport2110KNP.[CM1] IN (17357) "
+	
+	'--- Sale: 9, Sale Return: 3, Purchase:2, Purchase Return:10
+	SelectQuery = SelectQuery & "OUTER APPLY (" & _
+	"SELECT ISNULL(SUM(TableItemOpeningDetails.[D1]),0) + ISNULL(SUM(TableTransactionStockQty.[Value1]),0) As TISDCurrentStock " & _
+	"From [Tran2] As TableTransactionStockQty " & _
+	"LEFT JOIN [Tran4] As TableItemOpeningDetails ON TableItemOpeningDetails.[MasterCode1] = TableTransactionStockQty.[MasterCode1] " & _
+	"AND TableItemOpeningDetails.[MasterCode2] IN (17357, 17361) "
+	
+	SelectQuery = SelectQuery & "WHERE " & _
+	"TableTransactionStockQty.[RecType] = 2 " & _
+	"AND TableTransactionStockQty.[MasterCode1] = TableItemMaster.[Code] " & _
+	"And TableTransactionStockQty.[VchType] IN (9, 3, 2, 10) " & _ 
+	"AND TableTransactionStockQty.[MasterCode2] IN (17357, 17361)" & _
+	") AS TableItemCurrentStockInformation2110KNP "
+	
+	'--- Sale: 9, Sale Return: 3
+	
+	SelectQuery = SelectQuery & "OUTER APPLY (" & _
+	"SELECT (0 - ISNULL(SUM(TableItemSaleDetails.[Value1]),0)) As TISDSelectedDaysSaleQuantity " & _
+	"From [Tran2] As TableItemSaleDetails "
+	
+	If varIgnoreSalePartyNameTextToSearch <> "" And Len(varIgnoreSalePartyNameTextToSearch) > 0 Then
+		'LEFT Join Party Master Table
+		SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TablePartyMaster ON TableItemSaleDetails.[CM1] = TablePartyMaster.[Code] "
+	End If
+	
+	
+	SelectQuery = SelectQuery & " WHERE " & _
+	"TableItemSaleDetails.[RecType] = 2 " & _
+	"AND TableItemSaleDetails.[MasterCode1] = TableItemMaster.[Code] " & _
+	"And TableItemSaleDetails.[VchType] IN (9, 3) " & _ 
+	"AND TableItemSaleDetails.[MasterCode2] IN (23351) "
+	
+	'Selected Date Parameter'	
+	SelectQuery = SelectQuery & _
+	"And TableItemSaleDetails.[Date] >=" & BusyLib.GetDateQryStr(BusyRepOpt.OptStartDate) & " And TableItemSaleDetails.[Date] <=" & BusyLib.GetDateQryStr(BusyRepOpt.OptEndDate) &" "
+	
+	'Ignore Part Name Text To Search
+	If varIgnoreSalePartyNameTextToSearch <> "" And Len(varIgnoreSalePartyNameTextToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TablePartyMaster.[Name] NOT LIKE '"&varIgnoreSalePartyNameTextToSearch&"' "
+		'WriteInEventLog "varIgnoreSalePartyNameTextToSearch "&varIgnoreSalePartyNameTextToSearch,CTBCRScriptLogFileName		
+		
+	End If	
+	SelectQuery = SelectQuery & _
+	") AS TableItemSaleDetailsInformation3110DLI "	
+	
+	SelectQuery = SelectQuery & "LEFT JOIN [MasterSupport] As TableItemMasterSupport3110DLI " & _
+	"ON TableItemMasterSupport3110DLI.[MasterCode] = TableItemMaster.[Code] " & _
+	"AND TableItemMasterSupport3110DLI.[CM1] IN (23351) "
+	
+	'--- Sale: 9, Sale Return: 3, Purchase:2, Purchase Return:10
+	
+	SelectQuery = SelectQuery & "OUTER APPLY (" & _
+	"SELECT ISNULL(SUM(TableItemOpeningDetails.[D1]),0) + ISNULL(SUM(TableTransactionStockQty.[Value1]),0) As TISDCurrentStock " & _
+	"From [Tran2] As TableTransactionStockQty " & _
+	"LEFT JOIN [Tran4] As TableItemOpeningDetails ON TableItemOpeningDetails.[MasterCode1] = TableTransactionStockQty.[MasterCode1] " & _
+	"AND TableItemOpeningDetails.[MasterCode2] IN (23351) "
+	
+	SelectQuery = SelectQuery & "WHERE " & _
+	"TableTransactionStockQty.[RecType] = 2 " & _
+	"AND TableTransactionStockQty.[MasterCode1] = TableItemMaster.[Code] " & _
+	"And TableTransactionStockQty.[VchType] IN (9, 3, 2, 10) " & _ 
+	"AND TableTransactionStockQty.[MasterCode2] IN (23351) " & _
+	") AS TableItemCurrentStockInformation3110DLI "
+	
+	SelectQuery = SelectQuery & "WHERE TableItemMaster.[MasterType] = 6 "
+	
+	'Selected Item Masters Codes
+	If (varItemMasterCodes <> "" And varItemMasterSelectionType = 1) Then
+		SelectQuery = SelectQuery & _
+		"And TableItemMaster.[Code] IN ("&varItemMasterCodes&") "
+	End If
+	'Selected Item Master Group Code
+	If (varItemMasterParentGroupCode <> ""  And varItemMasterSelectionType = 2)Then
+		SelectQuery = SelectQuery & _
+		"And TableItemMaster.[ParentGrp] IN ("&varItemMasterParentGroupCode&") "
+	End If
+	'Selected Item Masters Codes
+	If (varItemMasterCodes <> "" And varItemMasterSelectionType = 4) Then
+		SelectQuery = SelectQuery & _
+		"And TableItemMaster.[Code] IN ("&varItemMasterCodes&") "
+	End If
+	
+	
+	'BOOL1	Ignore Blocked Items
+	If booleanIgnoreBlockedItems = True Then
+		SelectQuery = SelectQuery & _
+		"And TableItemMaster.[BlockedMaster] <> 1 "
+	End If	
+	
+	'BOOL2	Ignore Deactivated Items
+	If booleanIgnoreDeactivatedItems = True Then
+		SelectQuery = SelectQuery & _
+		"And TableItemMaster.[DeactiveMaster] <> 1 "
+	End If	
+	
+	'Order By
+	SelectQuery = SelectQuery & "Order By TableBusyGroupNameMaster.[Name],TableItemMaster.[Name] ASC"
+	'WriteInEventLog SelectQuery,CTBCRScriptLogFileName
+	
+	Set RecordSet= BusyLib.GetRecordset(SelectQuery)
+	'MsgBox("Records from DB - " & RecordSet.RecordCount)
+	'WriteInEventLog "Records from DB - " & RecordSet.RecordCount,CTBCRScriptLogFileName
+	With RecordSet
+		If .RecordCount>0 Then
+			.MoveLast
+			.MoveFirst
+			
+			Grid_Total_Rows .RecordCount
+			
+			Do While Not .EOF
+				If m_QuitRep=True Then Exit Sub
+				Grid_New_Entry 
+				
+				'Dim varItemName
+				'Dim varItemCode
+				'Dim varBusyGroupName
+				'Dim varParentGroupName
+				'Dim varGroupName
+				'Dim varManufacturingBrand
+				'Dim varConsumerBrand
+				'Dim var1111LKOSelectedDateSale
+				'Dim var1111LKOMaximumLevelStockQty
+				'Dim var1111LKOReorderLevelStockQty
+				'Dim var1111LKOCurrentStock
+				'Dim var1111LKOExcessorShortageStock
+				'Dim var1111LKORecommendationStockNeeded
+				'Dim var2111KNPSelectedDateSale
+				'Dim var2111KNPMaximumLevelStockQty
+				'Dim var2111KNPReorderLevelStockQty
+				'Dim var2111KNPCurrentStock
+				'Dim var2111KNPExcessorShortageStock
+				'Dim var2111KNPRecommendationStockNeeded
+				'Dim var3111DLISelectedDateSale
+				'Dim var3111DLIMaximumLevelStockQty
+				'Dim var3111DLIReorderLevelStockQty
+				'Dim var3111DLICurrentStock
+				'Dim var3111DLIExcessorShortageStock
+				'Dim var3111DLIRecommendationStockNeeded
+				'Dim varTotalSelectedDateSale
+				'Dim varTotalMaximumLevelStockQty
+				'Dim varTotalReorderLevelStockQty
+				'Dim varTotalCurrentStock
+				'Dim varTotalExcessorShortageStock
+				'Dim varTotalRecommendationStockNeeded
+				'Dim varLKOKNPRecommendedTrf
+				'Dim varLKODLIRecommendedTrf
+				'Dim varKNPLKORecommendedTrf
+				'Dim varKNPDLIRecommendedTrf
+				'Dim varDLILKORecommendedTrf
+				'Dim varDLIKNPRecommendedTrf
+				'Dim varLKORecommendedPurchase
+				'Dim varKNPRecommendedPurchase
+				'Dim varDLIRecommendedPurchase
+				'Dim varBlockedStatus
+				'Dim varDeactivatedStatus
+				'Dim varRemarks
+				varRemarks = ""
+				
+				
+				
+				'Item Name	Text	LEFT	40	---	No
+				varItemCode  = .Fields("ITMItemCode").Value
+				Grid_Throw_Data .Fields("TIMName").Value
+				'Item Code	Text	LEFT	14	---	No
+				Grid_Throw_Data .Fields("TIMAlias").Value
+				'Busy Group Name	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TBPGNMName").Value	
+				
+				'Parent Group Name	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TIMAIParentGroupCode").Value)
+				If (.Fields("TPGNMName").Value) <> "" Then
+					varParentGroupName =  .Fields("TPGNMName").Value
+				Else
+					varParentGroupName = ""
+				End If
+				Grid_Throw_Data varParentGroupName				
+				
+				'Group Name	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TIMAIGroupCode").Value)
+				If (.Fields("TGNMName").Value) <> "" Then
+					varGroupName =  .Fields("TGNMName").Value
+				Else
+					varGroupName = ""
+				End If
+				Grid_Throw_Data varGroupName	
+				
+				'Manufacturing Brand	Text	LEFT	40	---	No
+				If (.Fields("TMBMName").Value) <> "" Then
+					varManufacturingBrand =  .Fields("TMBMName").Value
+				Else
+					varManufacturingBrand = ""
+				End If
+				
+				Grid_Throw_Data varManufacturingBrand		
+				'Consumer Brand	Text	LEFT	40	---	No
+				If (.Fields("TCBMName").Value) <> "" Then
+					varConsumerBrand =  .Fields("TCBMName").Value
+				Else
+					varConsumerBrand = ""
+				End If
+				Grid_Throw_Data varConsumerBrand				
+				
+				
+				'1111 LKO - Selected Date Sale	Numeric	RIGHT	16	0	Yes
+				If (.Fields("TISDISelectedDaysSaleQuantity1110LKO").Value) <> 0 Then
+					Grid_Throw_Data .Fields("TISDISelectedDaysSaleQuantity1110LKO").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				'1111 LKO - Maximum Level Stock Qty	Numeric	RIGHT	16	0	Yes
+				If (.Fields("var1110LKOMaximumLevelQuantity").Value) <> 0 Then
+					Grid_Throw_Data .Fields("var1110LKOMaximumLevelQuantity").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				
+				
+				'1111 LKO - Reorder Level Stock Qty	Numeric	RIGHT	16	0	Yes
+				If (.Fields("var1110LKOReorderLevelQuantity").Value) <> 0 Then
+					Grid_Throw_Data .Fields("var1110LKOReorderLevelQuantity").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'1111 LKO - Current Stock	Numeric	RIGHT	16	0	Yes
+				If (.Fields("TICSI1110LKOCurrentStockQty").Value) <> 0 Then
+					Grid_Throw_Data .Fields("TICSI1110LKOCurrentStockQty").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'1111 LKO - Excess or Shortage Stock	Numeric	RIGHT	16	0	Yes
+				If (.Fields("var1110LKOShortAndExcessStock").Value) <> 0 Then
+					Grid_Throw_Data .Fields("var1110LKOShortAndExcessStock").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'1111 LKO - Recommendation Stock Needed	Numeric	RIGHT	16	0	Yes
+				If (.Fields("var1111LKORecommendationStockNeeded").Value) <> 0 Then
+					Grid_Throw_Data .Fields("var1111LKORecommendationStockNeeded").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'2111 KNP - Selected Date Sale	Numeric	RIGHT	16	0	Yes
+				If (.Fields("TISDISelectedDaysSaleQuantity2110KNP").Value) <> 0 Then
+					Grid_Throw_Data .Fields("TISDISelectedDaysSaleQuantity2110KNP").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'2111 KNP - Maximum Level Stock Qty	Numeric	RIGHT	16	0	Yes
+				If (.Fields("var2110KNPMaximumLevelQuantity").Value) <> 0 Then
+					Grid_Throw_Data .Fields("var2110KNPMaximumLevelQuantity").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'2111 KNP - Reorder Level Stock Qty	Numeric	RIGHT	16	0	Yes
+				If (.Fields("var2110KNPReorderLevelQuantity").Value) <> 0 Then
+					Grid_Throw_Data .Fields("var2110KNPReorderLevelQuantity").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'2111 KNP - Current Stock	Numeric	RIGHT	16	0	Yes
+				If (.Fields("TICSI2110KNPCurrentStockQty").Value) <> 0 Then
+					Grid_Throw_Data .Fields("TICSI2110KNPCurrentStockQty").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'2111 KNP - Excess or Shortage Stock	Numeric	RIGHT	16	0	Yes
+				If (.Fields("var2110KNPShortAndExcessStock").Value) <> 0 Then
+					Grid_Throw_Data .Fields("var2110KNPShortAndExcessStock").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'2111 KNP - Recommendation Stock Needed	Numeric	RIGHT	16	0	Yes
+				If (.Fields("var2111KNPRecommendationStockNeeded").Value) <> 0 Then
+					Grid_Throw_Data .Fields("var2111KNPRecommendationStockNeeded").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'3111 DLI - Selected Date Sale	Numeric	RIGHT	16	0	Yes
+				If (.Fields("TISDISelectedDaysSaleQuantity3110DLI").Value) <> 0 Then
+					Grid_Throw_Data .Fields("TISDISelectedDaysSaleQuantity3110DLI").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'3111 DLI - Maximum Level Stock Qty	Numeric	RIGHT	16	0	Yes
+				If (.Fields("var3110DLIMaximumLevelQuantity").Value) <> 0 Then
+					Grid_Throw_Data .Fields("var3110DLIMaximumLevelQuantity").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'3111 DLI - Reorder Level Stock Qty	Numeric	RIGHT	16	0	Yes
+				If (.Fields("var3110DLIReorderLevelQuantity").Value) <> 0 Then
+					Grid_Throw_Data .Fields("var3110DLIReorderLevelQuantity").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'3111 DLI - Current Stock	Numeric	RIGHT	16	0	Yes
+				If (.Fields("TICSI3110DLICurrentStockQty").Value) <> 0 Then
+					Grid_Throw_Data .Fields("TICSI3110DLICurrentStockQty").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'3111 DLI - Excess or Shortage Stock	Numeric	RIGHT	16	0	Yes
+				If (.Fields("var3110DLIShortAndExcessStock").Value) <> 0 Then
+					Grid_Throw_Data .Fields("var3110DLIShortAndExcessStock").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'3111 DLI - Recommendation Stock Needed	Numeric	RIGHT	16	0	Yes
+				If (.Fields("var3111DLIRecommendationStockNeeded").Value) <> 0 Then
+					Grid_Throw_Data .Fields("var3111DLIRecommendationStockNeeded").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Total - Selected Date Sale	Numeric	RIGHT	16	0	Yes
+				If (.Fields("varTotalSelectedDaysSale").Value) <> 0 Then
+					Grid_Throw_Data .Fields("varTotalSelectedDaysSale").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Total - Maximum Level Stock Qty	Numeric	RIGHT	16	0	Yes
+				If (.Fields("varTotalMaximumLevelQuantity").Value) <> 0 Then
+					Grid_Throw_Data .Fields("varTotalMaximumLevelQuantity").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Total - Reorder Level Stock Qty	Numeric	RIGHT	16	0	Yes
+				If (.Fields("varTotalReorderLevelQuantity").Value) <> 0 Then
+					Grid_Throw_Data .Fields("varTotalReorderLevelQuantity").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Total - Current Stock	Numeric	RIGHT	16	0	Yes
+				If (.Fields("varTotalCurrentStock").Value) <> 0 Then
+					Grid_Throw_Data .Fields("varTotalCurrentStock").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Total - Excess or Shortage Stock	Numeric	RIGHT	16	0	Yes
+				If (.Fields("varTotalShortAndExcessStock").Value) <> 0 Then
+					Grid_Throw_Data .Fields("varTotalShortAndExcessStock").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Total - Recommendation Stock Needed	Numeric	RIGHT	16	0	Yes
+				If (.Fields("varTotalRecommendationStockNeeded").Value) <> 0 Then
+					Grid_Throw_Data .Fields("varTotalRecommendationStockNeeded").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'LKO->KNP Recommended Trf	Numeric	RIGHT	16	0	Yes
+				Grid_Throw_Data .Fields("varLKOKNPRecommendedTrf").Value
+				
+				'LKO->DLI Recommended Trf	Numeric	RIGHT	16	0	Yes
+				Grid_Throw_Data .Fields("varLKODLIRecommendedTrf").Value
+				
+				'KNP->LKO Recommended Trf	Numeric	RIGHT	16	0	Yes
+				Grid_Throw_Data .Fields("varKNPLKORecommendedTrf").Value
+				
+				'KNP->DLI Recommended Trf	Numeric	RIGHT	16	0	Yes
+				Grid_Throw_Data .Fields("varKNPDLIRecommendedTrf").Value
+				
+				'DLI->LKO Recommended Trf	Numeric	RIGHT	16	0	Yes
+				Grid_Throw_Data .Fields("varDLILKORecommendedTrf").Value
+				
+				'DLI->KNP Recommended Trf	Numeric	RIGHT	16	0	Yes
+				Grid_Throw_Data .Fields("varDLIKNPRecommendedTrf").Value
+				
+				'LKO Recommended Purchase	Numeric	RIGHT	16	0	Yes
+				Grid_Throw_Data .Fields("varLKORecommendedPurchase").Value
+				
+				'KNP Recommended Purchase	Numeric	RIGHT	16	0	Yes
+				Grid_Throw_Data .Fields("varKNPRecommendedPurchase").Value
+				
+				'DLI Recommended Purchase	Numeric	RIGHT	16	0	Yes
+				Grid_Throw_Data .Fields("varDLIRecommendedPurchase").Value
+				
+				'Blocked Status	Text	CENTER	12	---	No
+				Grid_Throw_Data .Fields("TIMBlockedStatus").Value
+				'Deactivated Status	Text	CENTER	12	---	No
+				Grid_Throw_Data .Fields("TIMBDeactivatedStatus").Value
+				'Remarks	Text	LEFT	40	---	No
+				Grid_Throw_Data Trim(varRemarks)
+				
+
+				Grid_Next_Row .Fields("ITMItemCode").Value			
+				.MoveNext
+			Loop
+		End If
+	End With
+	UpdateFieldsInfo
+End Sub
+
+
+Public Sub OnEnterChs(p_OnEnterInfo)
+	On Error Resume Next
+	Dim varOptionToOpen
+	Dim varItemCode
+	Dim var1111LKOMCMasterCode 
+	Dim var2111KNPMCMasterCode
+	Dim var3111DLIMCMasterCode
+	
+	var1111LKOMCMasterCode = 15557
+	var2111KNPMCMasterCode = 17357
+	var3111DLIMCMasterCode = 23351
+		
+	varItemCode = p_OnEnterInfo
+
+	varOptionToOpen = BusyLib.GetOption3("Choose Option","1111 LKO Item Ledger","2111 LKO Item Ledger","3111 DLI Item Ledger",1)	
+	If varOptionToOpen = 1 Then
+		'OnEnter_Item_Ledger varItemCode,var1111LKOMCMasterCode,DateAdd("m",-3,Date),Date,True,False
+		OnEnter_Item_Ledger varItemCode,var1111LKOMCMasterCode,BusyRepOpt.OptStartDate,BusyRepOpt.OptEndDate,True,False	
+	BusyRepOpt.OptStartDate
+	ElseIf varOptionToOpen = 2 Then
+		OnEnter_Item_Ledger varItemCode,var2111KNPMCMasterCode,BusyRepOpt.OptStartDate,BusyRepOpt.OptEndDate,True,False	
+	ElseIf varOptionToOpen = 3Then
+		OnEnter_Item_Ledger varItemCode,var3111DLIMCMasterCode,BusyRepOpt.OptStartDate,BusyRepOpt.OptEndDate,True,False	
+	End If	
+End Sub
+
+
+Public Sub UpdateFieldsInfo()
+	BusyGrid.AddTopLabel1 "Sale From:"&BusyRepOpt.OptStartDate &" to:"&BusyRepOpt.OptEndDate
+	BusyGrid.AddTopLabel2  CTBCRByPrachaitVersion
+	BusyGrid.AddInfoLabel1 CTBCRResponsbilePersonForReport
+	BusyGrid.AddInfoLabel2 CTBCRByDevelopedPrachaitContactInformation
+	BusyGrid.AddInfoLabel3 CTBCRTodo
+	BusyGrid.AddInfoLabel4 "Status : ... Keep working !"
+End Sub
+
+
+Public Sub UpdateObjects(CEvents)
+	Set BusyLib = CreateObject("Busy2L21.CFixedInterface")
+	Set BusyConst = CreateObject("BusyCSC21.CGlobalConstants")
+	Set BusyRepOpt = CreateObject("Busy2L21.CRepOptions")
+	Set BusyCompConfig = CreateObject("Busy2L21.CCompany")
+	
+	Set BusyGrid = CEvents
+	Set BusyOnEnter = CEvents
+	
+	BusyUpdateRepOpt BusyRepOpt
+	BusyUpdateCompConfig BusyCompConfig
+End Sub
+
+
+Public Sub QuitRep(p_QuitVal)
+	m_QuitRep = p_QuitVal
+End Sub
+
+
+Public Sub Grid_Throw_Data(p_Data)
+	BusyGrid.ThrowData p_Data
+End Sub
+
+
+Public Sub Grid_Next_Row(p_OnEnterInfo)
+	BusyGrid.NextRow p_OnEnterInfo
+End Sub
+
+
+Public Sub Grid_Next_Row_With_Special_Effect(p_OnEnterInfo,p_SEConst)
+	BusyGrid.NextRow p_OnEnterInfo, p_SEConst
+End Sub
+
+
+Public Sub Grid_New_Entry()
+	BusyGrid.NewEntry
+End Sub
+
+
+Public Sub Grid_Total_Rows(p_TotalRows)
+	BusyGrid.TotalRows p_TotalRows
+End Sub
+
+
+Public Sub BusyUpdateCompConfig(p_Obj)
+	BusyGrid.UpdateCompConfig p_Obj
+End Sub
+
+
+Public Sub BusyUpdateRepOpt(p_Obj)
+	BusyGrid.UpdateRepOpt p_Obj
+End Sub
+
+
+Public Sub UpdateFormLabels()
+	
+End Sub
+
+
+'Public Sub AddTopLabel1(p_Label)
+'	BusyGrid.AddTopLabel1 p_Label 
+'End Sub 
+
+
+'Public Sub AddTopLabel2(p_Label)
+'	BusyGrid.AddTopLabel2 p_Label 
+'End Sub 
+
+
+'Public Sub AddInfoLabel1(p_Label)
+'	BusyGrid.AddInfoLabel1 p_Label 
+'End Sub 
+
+
+'Public Sub AddInfoLabel2(p_Label)
+'	BusyGrid.AddInfoLabel2 p_Label 
+'End Sub 
+
+
+'Public Sub AddInfoLabel3(p_Label)
+'	BusyGrid.AddInfoLabel3 p_Label 
+'End Sub 
+
+
+'Public Sub AddInfoLabel4(p_Label)
+'	BusyGrid.AddInfoLabel4 p_Label 
+'End Sub 
+
+
+Public Sub BusySetRepOpt(p_Obj)
+	BusyGrid.SetRepOpt p_Obj
+End Sub
+
+
+Public Sub BusyAddNewColumn(p_ColumnName, p_ColumnDataType, p_ColumnAlignment, p_ColumnMaxChar, p_ColumnMaxDecimal, p_ColumnShowTotal)
+	BusyGrid.AddNewColumn p_ColumnName, p_ColumnDataType, p_ColumnAlignment, p_ColumnMaxChar, p_ColumnMaxDecimal, p_ColumnShowTotal
+End Sub
+
+
+Public Sub OnEnter_Modify_Master(p_MasterType, p_MasterCode)
+	BusyOnEnter.ModifyMaster p_MasterType,p_MasterCode
+End Sub
+
+
+Public Sub OnEnter_Modify_Voucher(p_VchCode)
+	BusyOnEnter.ModifyVoucher p_VchCode
+End Sub
+
+
+Public Sub OnEnter_Acc_Ledger(p_AccCode, p_StartDate, p_EndDate)
+	BusyOnEnter.ShowAccLedger p_AccCode, p_StartDate, p_EndDate 
+End Sub
+
+
+Public Sub OnEnter_Acc_Ledger_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowAccLedgerWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Item_Ledger(p_ItemCode, p_MCCode, p_StartDate, p_EndDate, p_ShowVal, p_IUT)
+	BusyOnEnter.ShowItemMCLedger p_ItemCode, p_MCCode, p_StartDate, p_EndDate, p_ShowVal, p_IUT
+End Sub
+
+
+Public Sub OnEnter_Item_Ledger_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowItemMCLedgerWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Vch_List(p_VchType, p_StartDate, p_EndDate, p_VchSeriesCode)
+	BusyOnEnter.ShowVchsList p_VchType, p_StartDate, p_EndDate, p_VchSeriesCode
+End Sub
+
+
+Public Sub OnEnter_Vch_List_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowVchsListWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Custom_Report(p_FormatName, p_RepOptObj)
+	BusyOnEnter.ShowCustomReport p_FormatName, p_RepOptObj
+End Sub
+
+'Function by Developer - Prachait Saxena
+Public Function WriteInEventLog(LogText,LogFileName)
+	On Error Resume Next
+	dtmThisDay = Day(Date)
+	dtmThisMonth = Month(Date)
+	dtmThisYear = Year(Date)
+	dtmThisHour = Hour(Time)
+	dtmThisMinute = Minute(Time)
+	dtmThisSecond = Second(Time)
+	
+	If LogFileName = "" Then
+		LogFileName = CTBCRScriptLogFileName
+	End If 
+	Const ForAppending = 8
+	Set objFSO = CreateObject("Scripting.FileSystemObject")
+	
+	Set objTextFile = objFSO.OpenTextFile _
+	(LogFileName, ForAppending, True)
+	objTextFile.Write dtmThisYear&":"& dtmThisMonth&":"& dtmThisDay&" " & dtmThisHour&":"&dtmThisMinute&":"&dtmThisSecond& " - "  & LogText & vbCrLf
+	objTextFile.Close
+	WriteInEventLog = 1
+	'strBackupName = dtmThisYear & "_" & dtmThisMonth & "_" & dtmThisDay
+End Function
+
+'Update Item Master Purchase Price 
+Public Function UpdateItemMasterPurchasePrice(P_ItemCode,P_ItemMasterPruchasePrice)
+	On Error Resume Next
+	UpdateItemMasterPurchasePrice = 1
+End Function

@@ -1,0 +1,1067 @@
+Option Explicit
+
+Const CTBCRByPrachaitVersion = "Busy Custom Report - BCR PS_78ItemPurcVerify - Version PS20221213-1300"
+Const CTBCRByDevelopedPrachaitContactInformation = "Developed By Prachait Saxena, +919450901908, info@prachait.com"
+Const CTBCRScriptFileName = "PS_78ItemPurcVerify.vbs"
+Const CTBCRScriptLogFileName = "PS_78ItemPurcVerify.txt"
+'
+'
+'The Custom Report is to keep track the prucase price in the current year.
+'The BCR  Search the pruchase price in Current Year Only
+'The report generate the difference in the Last Purchase Price and Master Purchase Price also, show the L1, L2, L3 details of the purchase.
+'
+'Current Filters in use
+'Vendor, Item, Material Center, Sales Person, Date, Party Name, Ignore Party Name, Profit Percentage to Sales Person, Ignore Purchase Price Reduction
+'
+'Todo:
+'1. Implementaion of filters
+'Voucher Group, Voucher Series
+'2. Implementtion of Ignore Internal Lapking Purchase Price
+'Change Log
+'PS20221207-1300
+'Addition of On Enter option for selection of Item Master, Item Ledger, Vendor Ledger
+Const CTBCRTodo = "Todo: "
+Const CTBCRResponsbilePersonForReport = "To be reported by Aniket (Purchase) to management"
+
+
+Dim objFSO
+Dim objTextFile
+
+Dim BusyLib
+Dim BusyGrid
+Dim BusyOnEnter
+Dim BusyConst
+Dim BusyRepOpt
+Dim BusyCompConfig
+Dim m_QuitRep
+
+Dim varErrorLogFile
+Dim varErrorMessage
+Dim varErrorStatus
+
+Dim	dtmThisDay
+Dim	dtmThisMonth
+Dim	dtmThisYear
+Dim dtmThisHour
+Dim dtmThisMinute
+Dim dtmThisSecond
+
+
+Public Sub GenerateRep()
+	
+	'On Error Resume Next
+	
+	Dim SelectQuery
+	Dim RecordSet
+	Dim OldVchCode 
+	
+	Dim varItemName
+	Dim varItemCode
+	Dim varBusyGroupName
+	Dim varParentGroupName
+	Dim varGroupName
+	Dim varManufacturingBrand
+	Dim varConsumerBrand
+	Dim varOpeningPrice
+	Dim varItemMasterPurchasePrice
+	Dim varLastPurchasePrice
+	Dim varDifferenceinPriceMasterLastPurc	
+	Dim varUpdateItemMasterPurchasePriceRecords
+	Dim varLastPurchaseDate
+	Dim varLastPurchaseVendor
+	Dim varLastPurchaseAddedBy
+	Dim varLapkingInternalLastPurchasePrice
+	Dim varDifferenceinPriceMasterLapkingInternal	
+	Dim varLapkingInternalLastPurchaseDate
+	Dim varLapkingInternalPurchaseAddedBy	
+	Dim varL1PurchasePrice
+	Dim varL1PurchaseDate
+	Dim varL1PurchaseVendor
+	Dim varL2PurchasePrice
+	Dim varL2PurchaseDate
+	Dim varL2PurchaseVendor
+	Dim varL3PurchasePrice
+	Dim varL3PurchaseDate
+	Dim varL3PurchaseVendor
+	Dim varRemarks
+	
+	
+	'ITEM_RANGE	Select Item Master Range
+	'MC_RANGE	Select Material Center Master Range
+	'START_DATE	Purchase Added Between Starting Date
+	'END_DATE	Purchase Added Between Ending Date
+	'TEXT3	Purchase Added By
+	'TEXT1	Party Name (Use % Example %Prachait%)
+	'TEXT2	Ignore Last Purchase Party Name(s) (Ex. %Lapking%)
+	'ACCOUNT_RANGE	Select Vendor Master Range
+	'BROKER_RANGE	Select Purchase Manager
+	'VCH_SERIES_GRP_MAST	Select Voucher Series Group
+	'VCH_SERIES_NAME	Voucher Series
+	'BOOL1	Ignore Blocked Items
+	'BOOL2	Ignore Deactivated Items
+	'BOOL3	Reset Column Width in Sheet
+	'BOOL4	Update Last Purc Vch Price in Item Master
+	
+	OldVchCode=0
+	
+	Dim varCounter
+	
+	'Setup Filters from the Report Options
+	'ITEM_RANGE	Select Item Master Range
+	
+	'Filter For Item Master
+	Dim varItemMasterSelectionType
+	Dim varItemMasterCodes
+	Dim varItemMasterParentGroupCode
+	Dim varItemMasterSelected
+	Dim varItemMasterSelectedCodes
+	
+	varItemMasterSelectionType = BusyRepOpt.OptItemRange
+	If BusyRepOpt.OptItemRange = 1  Then	'One Item Selected
+		varItemMasterCodes = BusyRepOpt.OptItemCode
+		'WriteInEventLog "OptItemCode "&BusyRepOpt.OptItemCode,CTBCRScriptLogFileName 'For Single Selection Only
+	ElseIf BusyRepOpt.OptItemRange = 2  Then	'Item Group Selected
+		varItemMasterParentGroupCode = BusyRepOpt.OptIGrpCode
+		'WriteInEventLog "OptAGRPCode "&BusyRepOpt.OptIGrpCode,CTBCRScriptLogFileName			
+	ElseIf BusyRepOpt.OptItemRange = 3  Then	'All Items
+		
+	ElseIf BusyRepOpt.OptItemRange = 4  Then	'Selected Items	
+		Set varItemMasterSelectedCodes = BusyRepOpt.OptItemRangeSelectedCol
+		If varItemMasterSelectedCodes.Count > 0 Then
+			For varCounter = 1 To varItemMasterSelectedCodes.Count
+				varItemMasterCodes =  varItemMasterCodes & BusyLib.GetItemFromCol(varItemMasterSelectedCodes, varCounter) & "," 
+			Next 
+		End If 
+		varItemMasterCodes =  Left(varItemMasterCodes,Len(varItemMasterCodes)-1)  
+		If Len(varItemMasterCodes)=0 Then varItemMasterCodes="" 
+		varCounter = 0
+		'WriteInEventLog "varItemMasterCodes "&varItemMasterCodes,CTBCRScriptLogFileName 'For Single Selection Only
+	End If
+	
+	'Filter Party Name with Text
+	Dim varPartyNameTextToSearch
+	varPartyNameTextToSearch = BusyRepOpt.OptText1
+	
+	'Filter Ignore Party Name with Text
+	Dim varIgnorePartyNameTextToSearch
+	varIgnorePartyNameTextToSearch = BusyRepOpt.OptText2
+	
+	
+	'BOOL1	Ignore Blocked Items
+	Dim booleanIgnoreBlockedItems
+	booleanIgnoreBlockedItems = BusyRepOpt.OptBool1
+	
+	'BOOL2	Ignore Deactivated Items
+	Dim booleanIgnoreDeactivatedItems
+	booleanIgnoreDeactivatedItems = BusyRepOpt.OptBool2
+	
+	'BOOL3	Reset Column Width in Sheet
+	Dim BooleanResetColumnWidthinSheet
+	BooleanResetColumnWidthinSheet = BusyRepOpt.OptBool3
+	
+	'BOOL4	UpdateLastPurcVchPriceinItem Master		
+	Dim BooleanUpdateLastPurcVchPriceinItemMaster
+	BooleanUpdateLastPurcVchPriceinItemMaster = BusyRepOpt.OptBool4
+	
+	'ITEM_RANGE	Select Item Master Range
+	'MC_RANGE	Select Material Center Master Range
+	'START_DATE	Purchase Added Between Starting Date
+	'END_DATE	Purchase Added Between Ending Date
+	'TEXT3	Purchase Added By
+	'TEXT1	Party Name (Use % Example %Prachait%)
+	'TEXT2	Ignore Last Purchase Party Name(s) (Ex. %Lapking%)
+	'ACCOUNT_RANGE	Select Vendor Master Range
+	'BROKER_RANGE	Select Purchase Manager
+	'VCH_SERIES_GRP_MAST	Select Voucher Series Group
+	'VCH_SERIES_NAME	Voucher Series
+	'BOOL1	Ignore Blocked Items
+	'BOOL2	Ignore Deactivated Items
+	'BOOL3	Reset Column Width in Sheet
+	'BOOL4	Update Last Purc Vch Price in Item Master		
+	
+	
+	'Filter For Account Master
+	'Variables Used in BusyReportOptions
+	'	Dim varAccountMasterSelectionType
+	'	Dim varAccountMasterCodes
+	'	Dim varAccountMasterParentGroupCode
+	'	Dim varAccountMasterSelected
+	'	Dim varAccountMasterSelectedCodes
+	'	
+	'WriteInEventLog "Account Master Range "&BusyRepOpt.OptAccRange,CTBCRScriptLogFileName
+	'	varAccountMasterSelectionType = BusyRepOpt.OptAccRange
+	'	If BusyRepOpt.OptAccRange = 1  Then	'One Account Selected
+	'		varAccountMasterCodes = BusyRepOpt.OptAccCode
+	'WriteInEventLog "OptAccCode "&BusyRepOpt.OptAccCode,CTBCRScriptLogFileName 'For Single Selection Only
+	'	ElseIf BusyRepOpt.OptAccRange = 2  Then	'Account Group Selected
+	'		varAccountMasterParentGroupCode = BusyRepOpt.OptAGRPCode
+	'WriteInEventLog "OptAGRPCode "&BusyRepOpt.OptAGRPCode,CTBCRScriptLogFileName			
+	'	ElseIf BusyRepOpt.OptAccRange = 3  Then	'All Accounts
+	'		
+	'	ElseIf BusyRepOpt.OptAccRange = 4  Then	'Selected Accounts	
+	'		Set varAccountMasterSelectedCodes = BusyRepOpt.OptAccRangeSelectedCol
+	'		If varAccountMasterSelectedCodes.Count > 0 Then
+	'			For varCounter = 1 To varAccountMasterSelectedCodes.Count
+	'				varAccountMasterCodes =  varAccountMasterCodes & BusyLib.GetItemFromCol(varAccountMasterSelectedCodes, varCounter) & "," 
+	'			Next 
+	'		End If 
+	'		varAccountMasterCodes =  Left(varAccountMasterCodes,Len(varAccountMasterCodes)-1)  
+	'		If Len(varAccountMasterCodes)=0 Then varAccountMasterCodes="" 
+	'		varCounter = 0
+	'WriteInEventLog "varAccountMasterCodes "&varAccountMasterCodes,CTBCRScriptLogFileName 'For Single Selection Only
+	'	End If
+	'	
+	'	
+	'Filter For Salesman
+	'	Dim varSalesmanSelectionType
+	'	Dim varSalesmanCodes
+	'	Dim varSalesmanParentGroupCode
+	'	Dim varSalesmanSelected
+	'	Dim varSalesmanSelectedCodes
+	'	
+	'WriteInEventLog "Salesman Range "&BusyRepOpt.OptBrokerRange,CTBCRScriptLogFileName
+	'	varSalesmanSelectionType = BusyRepOpt.OptBrokerRange
+	'	If BusyRepOpt.OptBrokerRange = 1  Then	'One Item Selected
+	'		varSalesmanCodes = BusyRepOpt.OptBrokerCode
+	'WriteInEventLog "OptBrokerCode "&BusyRepOpt.OptBrokerCode,CTBCRScriptLogFileName 'For Single Selection Only
+	'	ElseIf BusyRepOpt.OptBrokerRange = 2  Then	'Item Group Selected
+	'varSalesmanParentGroupCode = BusyRepOpt.OptIGrpCode
+	'WriteInEventLog "OptAGRPCode "&BusyRepOpt.OptIGrpCode,CTBCRScriptLogFileName			
+	'	ElseIf BusyRepOpt.OptBrokerRange = 3  Then	'All Items
+	'		
+	'	ElseIf BusyRepOpt.OptBrokerRange = 4  Then	'Selected Items	
+	'		Set varSalesmanSelectedCodes = BusyRepOpt.OptBrokerRangeSelectedCol
+	'		If varSalesmanSelectedCodes.Count > 0 Then
+	'			For varCounter = 1 To varSalesmanSelectedCodes.Count
+	'				varSalesmanCodes =  varSalesmanCodes & BusyLib.GetItemFromCol(varSalesmanSelectedCodes, varCounter) & "," 
+	'			Next 
+	'		End If 
+	'		varSalesmanCodes =  Left(varSalesmanCodes,Len(varSalesmanCodes)-1)  
+	'		If Len(varSalesmanCodes)=0 Then varSalesmanCodes="" 
+	'		varCounter = 0
+	'WriteInEventLog "varSalesmanCodes "&varSalesmanCodes,CTBCRScriptLogFileName 'For Single Selection Only
+	'	End If
+	'	
+	'Filter For Material Center
+	'	Dim varMaterialCenterSelectionType
+	'	Dim varMaterialCenterCodes
+	'	Dim varMaterialCenterParentGroupCode
+	'	Dim varMaterialCenterSelected
+	'	Dim varMaterialCenterSelectedCodes
+	'	
+	'	varMaterialCenterSelectionType = BusyRepOpt.OptMCRange
+	'	If BusyRepOpt.OptMCRange = 1  Then	'One Item Selected
+	'		varMaterialCenterCodes = BusyRepOpt.OptMCCode
+	'WriteInEventLog "OptMCCode "&BusyRepOpt.OptMCCode,CTBCRScriptLogFileName 'For Single Selection Only
+	'	ElseIf BusyRepOpt.OptMCRange = 2  Then	'Item Group Selected
+	'		varMaterialCenterParentGroupCode = BusyRepOpt.OptMCGrpCode
+	'WriteInEventLog "OptMCGrpCode "&BusyRepOpt.OptMCGrpCode,CTBCRScriptLogFileName			
+	'	ElseIf BusyRepOpt.OptMCRange = 3  Then	'All Items
+	'		
+	'	ElseIf BusyRepOpt.OptMCRange = 4  Then	'Selected Items	
+	'		Set varMaterialCenterSelectedCodes = BusyRepOpt.OptMCRangeSelectedCol
+	'		If varMaterialCenterSelectedCodes.Count > 0 Then
+	'			For varCounter = 1 To varMaterialCenterSelectedCodes.Count
+	'				varMaterialCenterCodes =  varMaterialCenterCodes & BusyLib.GetItemFromCol(varMaterialCenterSelectedCodes, varCounter) & "," 
+	'			Next 
+	'		End If 
+	'		varMaterialCenterCodes =  Left(varMaterialCenterCodes,Len(varMaterialCenterCodes)-1)  
+	'		If Len(varMaterialCenterCodes)=0 Then varMaterialCenterCodes="" 
+	'		varCounter = 0
+	'WriteInEventLog "varMaterialCenterCodes "&varMaterialCenterCodes,CTBCRScriptLogFileName 'For Single Selection Only
+	'	End If
+	'	
+	'Filter For Voucher Series Group
+	'	Dim varVoucherSeriesGroupCode
+	'	varVoucherSeriesGroupCode = BusyRepOpt.OptVchSeriesGrpCode
+	'WriteInEventLog "Line 265 varVoucherSeriesGroupCodes "&varVoucherSeriesGroupCode,CTBCRScriptLogFileName 'For Single Selection Only	
+	'	
+	'Filter for Voucher Series
+	'	
+	'Filter Party Name with Text
+	'	Dim varPartyNameTextToSearch
+	'	varPartyNameTextToSearch = BusyRepOpt.OptText1
+	'	
+	'Filter Ignore Party Name with Text
+	'	Dim varIgnorePartyNameTextToSearch
+	'	varIgnorePartyNameTextToSearch = BusyRepOpt.OptText2
+	'	
+	'Profit % Calculation
+	'	varSalePersonComissionPercentageOnProfit = CTSalePersonComissionPercentageOnProfit
+	'	Dim varUserEnterdProfitPercentageForCalculations
+	'	varUserEnterdProfitPercentageForCalculations = BusyRepOpt.OptText3
+	'	If (Len(varUserEnterdProfitPercentageForCalculations) > 0 And IsNumeric(varUserEnterdProfitPercentageForCalculations) = True) Then
+	'		varSalePersonComissionPercentageOnProfit = varUserEnterdProfitPercentageForCalculations
+	'	ElseIf  (Len(varUserEnterdProfitPercentageForCalculations) > 0 And IsNumeric(varUserEnterdProfitPercentageForCalculations) = False) Then
+	'		MsgBox ("Enter integer value in profit percentage calculation field")
+	'		varSalePersonComissionPercentageOnProfit = CTSalePersonComissionPercentageOnProfit
+	'	End If
+	'	
+	
+	'Item Name	Text	LEFT	40	---	No
+	'Item Code	Text	LEFT	14	---	No
+	'Busy Group Name	Text	LEFT	40	---	No
+	'Parent Group Name	Text	LEFT	40	---	No
+	'Group Name	Text	LEFT	40	---	No
+	'Manufacturing Brand	Text	LEFT	40	---	No
+	'Consumer Brand	Text	LEFT	40	---	No
+	'Opening Price	Numeric	RIGHT	16	2	No
+	'Item Master Purchase Price	Numeric	RIGHT	16	2	No
+	'Last Purchase Price	Numeric	RIGHT	16	2	No
+	'Difference in Price (Master - Last Purc)	Numeric	RIGHT	16	2	No
+	'Last Purchase Date	Date	CENTER	10	---	No
+	'Last Purchase Vendor	Text	LEFT	40	---	No
+	'Last Purchase VchNo	Text	CENTER	12	---	No
+	'Last Purchase Added By	Text	LEFT	40	---	No
+	'Lapking Internal Last Purchase Price	Numeric	RIGHT	16	2	No
+	'Difference in Price (Master - Lapking Internal)	Numeric	RIGHT	16	2	No
+	'Lapking Internal Last Purchase Date	Date	CENTER	10	---	No
+	'Lapking Internal Purchase VchNo	Text	CENTER	12	---	No
+	'Lapking Internal Purchase Added By	Text	LEFT	40	---	No
+	'L1 Purchase Price	Numeric	RIGHT	16	2	No
+	'L1 Purchase Date	Date	CENTER	10	---	No
+	'L1 Purchase Vendor	Text	LEFT	40	---	No
+	'L2 Purchase Price	Numeric	RIGHT	16	2	No
+	'L2 Purchase Date	Date	CENTER	10	---	No
+	'L2 Purchase Vendor	Text	LEFT	40	---	No
+	'L3 Purchase Price	Numeric	RIGHT	16	2	No
+	'L3 Purchase Date	Date	CENTER	10	---	No
+	'L3 Purchase Vendor	Text	LEFT	40	---	No
+	'Blocked Status	Text	CENTER	12	---	No
+	'Deactivated Status	Text	CENTER	12	---	No
+	'Remarks	Text	LEFT	40	---	No
+	
+	'SELECT 
+	'	TableItemMaster.[Code] As ITMItemCode
+	'	,TableItemMaster.[Name] As TIMName
+	'	,TableItemMaster.[Alias] As TIMAlias
+	'	,TableItemMaster.[ParentGrp] As TIMBusyParentGroupCode
+	'	,TableBusyGroupNameMaster.[Name] As TBPGNMName
+	'	,ISNULL(TableItemMasterDetailedInfo.[OF2],'') As TIMAIParentGroupCode
+	'	,ISNULL(TableParentGroupNameMaster.[Name],'') As TPGNMName
+	'	,ISNULL(TableItemMasterDetailedInfo.[OF3],'') As TIMAIGroupCode
+	'	,ISNULL(TableGroupNameMaster.[Name],'') As TGNMName
+	'	,ISNULL(TableItemMasterDetailedInfo.[OF4],'') As TIMAIManufacturingBrandCode
+	'	,ISNULL(TableManufacturingBrandMaster.[Name],'') As TMBMName
+	'	,ISNULL(TableItemMasterDetailedInfo.[OF5],'') As TIMAIConsumberBrandCode
+	'	,ISNULL(TableConsumerBrandMaster.[Name],'') As TCBMName
+	'	,ISNULL(TableItemOpeningPrice.[D3],0)/ISNULL(TableItemOpeningPrice.[D1],1) As TIOPOpeningPrice
+	'	,ISNULL(TableItemMaster.[D4],'') As TIMItemMasterPurchasePrice
+	'	,ISNULL(TableLastPurchaseInformation.[LastPurchaseVchCode],'0') As TLPILastPurchaseVchCode
+	'	,ISNULL(TableLastPurchaseInformation.[LastPurchasePrice],'0') As TLPILastPurchasePrice
+	'	,ISNULL(TableLastPurchaseInformation.[LastPurchaseDate],'') As TLPILastPurchaseDate
+	'	,ISNULL(TableLastPurchaseInformation.LastPurchaseMaterialCenterCode,'') As TLPILastPurchaseMaterialCenterCode
+	'	,ISNULL(TableLastPurchaseInformation.[LastPurchaseVendorCode],'') As TLPILastPurchaseVendorCode
+	'	,ISNULL(TableLastPurchaseInformation.[LastPurchaseVendorName],'') As TLPILastPurchaseVendorName
+	'	,ISNULL(TableLastPurchaseInformation.[LastPurchaseVchNo],'') As TLPILastPurchaseVchNo
+	'	,ISNULL(TableLapkingInternalLastPurchaseInformation.[LastLapkingInternalPurchaseVchCode],'0') As TLILPILastLapkingInternalPurchaseVchCode
+	'	,ISNULL(TableLapkingInternalLastPurchaseInformation.[LastLapkingInternalPurchasePrice],'0') As TLILPILastLapkingInternalPurchasePrice
+	'	,ISNULL(TableLapkingInternalLastPurchaseInformation.[LastLapkingInternalPurchaseDate],'') As LastLapkingInternalPurchaseDate
+	'	,ISNULL(TableLapkingInternalLastPurchaseInformation.[LastLapkingInternalPurchaseVchNo],'') As LastLapkingInternalPurchaseVchNo
+	'	,IIF(TableItemMaster.[BlockedMaster] = 1,'Blocked','Active') As TIMBlockedStatus
+	'	,IIF(TableItemMaster.[DeactiveMaster] = 1,'Deactivated','Active') As TIMBDeactivatedStatus 
+	'FROM 
+	'	[Master1] As TableItemMaster 
+	'	LEFT JOIN [MasterAddressInfo] As TableItemMasterDetailedInfo 
+	'		ON TableItemMaster.[Code] = TableItemMasterDetailedInfo.[MasterCode] 
+	'	LEFT JOIN [Master1] As TableBusyGroupNameMaster 
+	'		ON TableBusyGroupNameMaster.[Code] = TableItemMaster.[ParentGrp] 
+	'	LEFT JOIN [Master1] As TableParentGroupNameMaster 
+	'		ON TableParentGroupNameMaster.[Code] = TableItemMasterDetailedInfo.[OF2] 
+	'	LEFT JOIN [Master1] As TableGroupNameMaster 
+	'		ON TableGroupNameMaster.[Code] = TableItemMasterDetailedInfo.[OF3] 
+	'	LEFT JOIN [Master1] As TableManufacturingBrandMaster 
+	'		ON TableManufacturingBrandMaster.[Code] = TableItemMasterDetailedInfo.[OF4] 
+	'	LEFT JOIN [Master1] As TableConsumerBrandMaster 
+	'		ON TableConsumerBrandMaster.[Code] = TableItemMasterDetailedInfo.[OF5] 
+	'	LEFT JOIN [Tran4] As TableItemOpeningPrice 
+	'		ON TableItemOpeningPrice.[MasterCode1] = TableItemMaster.[Code] AND TableItemOpeningPrice.[BranchCode] = 0 
+	'	OUTER APPLY 
+	'		(SELECT TOP 1 TableInTransaction.[VchCode] As LastPurchaseVchCode 
+	'			,TableInTransaction.[D2] As LastPurchasePrice
+	'			,TableInTransaction.[Date] As LastPurchaseDate
+	'			,TableInTransaction.[MasterCode2] As LastPurchaseMaterialCenterCode
+	'			,TableInTransaction.[CM1] As LastPurchaseVendorCode
+	'			,TableVendorMaster.[Name] As LastPurchaseVendorName
+	'			,LTRIM(RTRIM(TableInTransaction.[VchNo])) As LastPurchaseVchNo 
+	'		FROM 
+	'			[Tran2] AS TableInTransaction 
+	'			LEFT JOIN [Master1] As TableVendorMaster 
+	'				ON TableInTransaction.[CM1] = TableVendorMaster.[Code] 
+	'		WHERE 
+	'			TableInTransaction.[MasterCode1] = TableItemMaster.[Code] 
+	'			AND TableInTransaction.[VchType] IN (2) 
+	'			And TableVendorMaster.[Name] NOT LIKE '%Lapking%' 
+	'		Order By 
+	'			TableInTransaction.[Date] DESC
+	'		,TableInTransaction.[VchCode] DESC) AS TableLastPurchaseInformation 
+	'	OUTER APPLY (
+	'		SELECT TOP 1 
+	'			TableInTransaction.[VchCode] As LastLapkingInternalPurchaseVchCode
+	'			,TableInTransaction.[D2] As LastLapkingInternalPurchasePrice
+	'			,TableInTransaction.[Date] As LastLapkingInternalPurchaseDate
+	'			,TableVendorMaster.[Name] As LastLapkingInternalPurchaseVendorName
+	'			,LTRIM(RTRIM(TableInTransaction.[VchNo])) As LastLapkingInternalPurchaseVchNo 
+	'		FROM 
+	'			[Tran2] AS TableInTransaction 
+	'			LEFT JOIN [Master1] As TableVendorMaster 
+	'				ON TableInTransaction.[CM1] = TableVendorMaster.[Code] 
+	'		WHERE 
+	'			TableInTransaction.[MasterCode1] = TableItemMaster.[Code] 
+	'			AND TableInTransaction.[VchType] IN (2) 
+	'			AND TableVendorMaster.[Name] LIKE '%Lapking%' 
+	'			AND TableInTransaction.[Date] >= TableLastPurchaseInformation.[LastPurchaseDate]  
+	'		Order By 
+	'			TableInTransaction.[Date] DESC
+	'			, TableInTransaction.[VchCode] DESC) 
+	'		AS TableLapkingInternalLastPurchaseInformation 
+	'WHERE 
+	'	TableItemMaster.[MasterType] = 6 
+	'	And TableItemMaster.[ParentGrp] IN (1586) 
+	'	And TableItemMaster.[BlockedMaster] <> 1 
+	'	And TableItemMaster.[DeactiveMaster] <> 1 
+	'Order By 
+	'	TableBusyGroupNameMaster.[Name]
+	'	,TableItemMaster.[Name] ASC
+	
+	
+	
+	
+	'Select SQL Query
+	'NON Visible Fields
+	'Voucher Type
+	SelectQuery = "SELECT TableItemMaster.[Code] As ITMItemCode"
+	
+	'Item Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableItemMaster.[Name] As TIMName"
+	
+	'Item Code	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableItemMaster.[Alias] As TIMAlias"
+	
+	'Busy Group Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",TableItemMaster.[ParentGrp] As TIMBusyParentGroupCode"
+	SelectQuery = SelectQuery & ",TableBusyGroupNameMaster.[Name] As TBPGNMName"
+	
+	'Parent Group Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableItemMasterDetailedInfo.[OF2],'') As TIMAIParentGroupCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableParentGroupNameMaster.[Name],'') As TPGNMName"
+	
+	'Group Name	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableItemMasterDetailedInfo.[OF3],'') As TIMAIGroupCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableGroupNameMaster.[Name],'') As TGNMName"
+	
+	'Manufacturing Brand	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableItemMasterDetailedInfo.[OF4],'') As TIMAIManufacturingBrandCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableManufacturingBrandMaster.[Name],'') As TMBMName"
+	
+	'Consumer Brand	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableItemMasterDetailedInfo.[OF5],'') As TIMAIConsumberBrandCode"
+	SelectQuery = SelectQuery & ",ISNULL(TableConsumerBrandMaster.[Name],'') As TCBMName"
+	
+	'Opening Price	Numeric	RIGHT	16	2	No	
+	SelectQuery = SelectQuery & ",ISNULL(TableItemOpeningPrice.[D3],0)/ISNULL(TableItemOpeningPrice.[D1],1) As TIOPOpeningPrice"
+	
+	'Item Master Purchase Price	Numeric	RIGHT	16	2	No
+	SelectQuery = SelectQuery & ",ISNULL(TableItemMaster.[D4],'') As TIMItemMasterPurchasePrice"
+	
+	SelectQuery = SelectQuery & ",ISNULL(TableLastPurchaseInformation.[LastPurchaseVchCode],'0') As TLPILastPurchaseVchCode"
+	'Last Purchase Price	Numeric	RIGHT	16	2	No
+	SelectQuery = SelectQuery & ",ISNULL(TableLastPurchaseInformation.[LastPurchasePrice],'0') As TLPILastPurchasePrice"
+	
+	'Last Purchase Date	Date	CENTER	10	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableLastPurchaseInformation.[LastPurchaseDate],'') As TLPILastPurchaseDate"
+	
+	SelectQuery = SelectQuery & ",ISNULL(TableLastPurchaseInformation.LastPurchaseMaterialCenterCode,'') As TLPILastPurchaseMaterialCenterCode"
+	
+	'Last Purchase Vendor	Text	LEFT	40	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableLastPurchaseInformation.[LastPurchaseVendorCode],'') As TLPILastPurchaseVendorCode"	
+	SelectQuery = SelectQuery & ",ISNULL(TableLastPurchaseInformation.[LastPurchaseVendorName],'') As TLPILastPurchaseVendorName"
+	
+	'Last Purchase VchNo	Text	CENTER	12	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableLastPurchaseInformation.[LastPurchaseVchNo],'') As TLPILastPurchaseVchNo"
+	
+	SelectQuery = SelectQuery & ",ISNULL(TableLapkingInternalLastPurchaseInformation.[LastLapkingInternalPurchaseVchCode],'0') As TLILPILastLapkingInternalPurchaseVchCode"
+	'Lapking Internal Last Purchase Price	Numeric	RIGHT	16	2	No
+	SelectQuery = SelectQuery & ",ISNULL(TableLapkingInternalLastPurchaseInformation.[LastLapkingInternalPurchasePrice],'0') As TLILPILastLapkingInternalPurchasePrice"
+	
+	'Lapking Internal Last Purchase Date	Date	CENTER	10	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableLapkingInternalLastPurchaseInformation.[LastLapkingInternalPurchaseDate],'') As LastLapkingInternalPurchaseDate"
+	
+	'Lapking Internal Purchase VchNo	Text	CENTER	12	---	No
+	SelectQuery = SelectQuery & ",ISNULL(TableLapkingInternalLastPurchaseInformation.[LastLapkingInternalPurchaseVchNo],'') As LastLapkingInternalPurchaseVchNo"
+	
+	'Blocked Status	Text	CENTER	12	---	No
+	SelectQuery = SelectQuery & ",IIF(TableItemMaster.[BlockedMaster] = 1,'Blocked','Active') As TIMBlockedStatus"
+	
+	'Deactivated Status	Text	CENTER	12	---	No									
+	SelectQuery = SelectQuery & ",IIF(TableItemMaster.[DeactiveMaster] = 1,'Deactivated','Active') As TIMBDeactivatedStatus"
+	
+	'SELECT From (The Start table)
+	SelectQuery = SelectQuery & " FROM [Master1] As TableItemMaster "
+	
+	'LEFT Join Item Master Detailed Information Table
+	SelectQuery = SelectQuery & "LEFT JOIN [MasterAddressInfo] As TableItemMasterDetailedInfo ON TableItemMaster.[Code] = TableItemMasterDetailedInfo.[MasterCode] "
+	
+	'LEFT Join Busy Group Name Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableBusyGroupNameMaster ON TableBusyGroupNameMaster.[Code] = TableItemMaster.[ParentGrp] "
+	
+	'LEFT Join Parent Group Name Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableParentGroupNameMaster ON TableParentGroupNameMaster.[Code] = TableItemMasterDetailedInfo.[OF2] "
+	
+	'LEFT Join Group Name Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableGroupNameMaster ON TableGroupNameMaster.[Code] = TableItemMasterDetailedInfo.[OF3] "
+	
+	'LEFT Join Manufacturing Brand Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableManufacturingBrandMaster ON TableManufacturingBrandMaster.[Code] = TableItemMasterDetailedInfo.[OF4] "
+	
+	'LEFT Join Consumer Brand Master Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Master1] As TableConsumerBrandMaster ON TableConsumerBrandMaster.[Code] = TableItemMasterDetailedInfo.[OF5] "
+	
+	'LEFT Join Opening Price Table
+	SelectQuery = SelectQuery & "LEFT JOIN [Tran4] As TableItemOpeningPrice ON TableItemOpeningPrice.[MasterCode1] = TableItemMaster.[Code] " & _
+	"AND TableItemOpeningPrice.[BranchCode] = 0 "	
+	
+	'Outer Apply - Join Last Purchase Vouhcer Information '2 = Purchase and 8 = StkJrnl
+	
+	SelectQuery = SelectQuery & "OUTER APPLY (" & _
+	"SELECT TOP 1 " & _
+	"TableInTransaction.[VchCode] As LastPurchaseVchCode " & _
+	",TableInTransaction.[D2] As LastPurchasePrice " & _
+	",TableInTransaction.[Date] As LastPurchaseDate " & _
+	",TableInTransaction.[MasterCode2] As LastPurchaseMaterialCenterCode " & _	
+	",TableInTransaction.[CM1] As LastPurchaseVendorCode " & _	
+	",TableVendorMaster.[Name] As LastPurchaseVendorName " & _
+	",LTRIM(RTRIM(TableInTransaction.[VchNo])) As LastPurchaseVchNo " & _	
+	"FROM [Tran2] AS TableInTransaction " & _
+	"LEFT JOIN [Master1] As TableVendorMaster ON TableInTransaction.[CM1] = TableVendorMaster.[Code] " & _
+	"WHERE TableInTransaction.[MasterCode1] = TableItemMaster.[Code] " & _
+	"AND TableInTransaction.[VchType] IN (2) "
+	
+	'Part Name Text To Search
+	If varPartyNameTextToSearch <> "" And Len(varPartyNameTextToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TableVendorMaster.[Name] LIKE '"&varPartyNameTextToSearch&"' "
+		'	WriteInEventLog "varPartyNameTextToSearch "&varPartyNameTextToSearch,CTBCRScriptLogFileName		
+		
+	End If
+	'Ignore Part Name Text To Search
+	If varIgnorePartyNameTextToSearch <> "" And Len(varIgnorePartyNameTextToSearch) > 0 Then
+		SelectQuery = SelectQuery & _
+		"And TableVendorMaster.[Name] NOT LIKE '"&varIgnorePartyNameTextToSearch&"' "
+		'	WriteInEventLog "varIgnorePartyNameTextToSearch "&varIgnorePartyNameTextToSearch,CTBCRScriptLogFileName		
+		
+	End If
+	
+	
+	SelectQuery = SelectQuery & _
+	"Order By TableInTransaction.[Date] DESC, TableInTransaction.[VchCode] DESC) AS TableLastPurchaseInformation "
+	
+	SelectQuery = SelectQuery & "OUTER APPLY (" & _
+	"SELECT TOP 1 " & _
+	"TableInTransaction.[VchCode] As LastLapkingInternalPurchaseVchCode " & _
+	",TableInTransaction.[D2] As LastLapkingInternalPurchasePrice " & _
+	",TableInTransaction.[Date] As LastLapkingInternalPurchaseDate " & _
+	",TableVendorMaster.[Name] As LastLapkingInternalPurchaseVendorName " & _
+	",LTRIM(RTRIM(TableInTransaction.[VchNo])) As LastLapkingInternalPurchaseVchNo " & _
+	"FROM [Tran2] AS TableInTransaction " & _
+	"LEFT JOIN [Master1] As TableVendorMaster ON TableInTransaction.[CM1] = TableVendorMaster.[Code] " & _
+	"WHERE TableInTransaction.[MasterCode1] = TableItemMaster.[Code] " & _
+	"AND TableInTransaction.[VchType] IN (2) " & _
+	"AND TableVendorMaster.[Name] LIKE '%Lapking%' " & _	
+	"AND TableInTransaction.[Date] >= TableLastPurchaseInformation.[LastPurchaseDate]  " & _
+	"Order By TableInTransaction.[Date] DESC, TableInTransaction.[VchCode] DESC) AS TableLapkingInternalLastPurchaseInformation "
+	
+	SelectQuery = SelectQuery & "WHERE TableItemMaster.[MasterType] = 6 "
+	
+	'Selected Item Masters Codes
+	If (varItemMasterCodes <> "" And varItemMasterSelectionType = 1) Then
+		SelectQuery = SelectQuery & _
+		"And TableItemMaster.[Code] IN ("&varItemMasterCodes&") "
+	End If
+	'Selected Item Master Group Code
+	If (varItemMasterParentGroupCode <> ""  And varItemMasterSelectionType = 2)Then
+		SelectQuery = SelectQuery & _
+		"And TableItemMaster.[ParentGrp] IN ("&varItemMasterParentGroupCode&") "
+	End If
+	'Selected Item Masters Codes
+	If (varItemMasterCodes <> "" And varItemMasterSelectionType = 4) Then
+		SelectQuery = SelectQuery & _
+		"And TableItemMaster.[Code] IN ("&varItemMasterCodes&") "
+	End If
+	
+	
+	'BOOL1	Ignore Blocked Items
+	If booleanIgnoreBlockedItems = True Then
+		SelectQuery = SelectQuery & _
+		"And TableItemMaster.[BlockedMaster] <> 1 "
+	End If	
+	
+	'BOOL2	Ignore Deactivated Items
+	If booleanIgnoreDeactivatedItems = True Then
+		SelectQuery = SelectQuery & _
+		"And TableItemMaster.[DeactiveMaster] <> 1 "
+	End If	
+	
+	'Order By
+	SelectQuery = SelectQuery & "Order By TableBusyGroupNameMaster.[Name],TableItemMaster.[Name] ASC"
+	'WriteInEventLog SelectQuery,CTBCRScriptLogFileName
+	
+	Set RecordSet= BusyLib.GetRecordset(SelectQuery)
+	'MsgBox("Records from DB - " & RecordSet.RecordCount)
+	'WriteInEventLog "Records from DB - " & RecordSet.RecordCount,CTBCRScriptLogFileName
+	With RecordSet
+		If .RecordCount>0 Then
+			.MoveLast
+			.MoveFirst
+			
+			Grid_Total_Rows .RecordCount
+			
+			Do While Not .EOF
+				If m_QuitRep=True Then Exit Sub
+				Grid_New_Entry 
+				
+				varItemName = ""
+				varItemCode = ""
+				varBusyGroupName = ""
+				varParentGroupName = ""
+				varGroupName = ""
+				varManufacturingBrand = ""
+				varConsumerBrand = ""
+				varOpeningPrice = ""
+				varItemMasterPurchasePrice = ""
+				varLastPurchasePrice = ""
+				varDifferenceinPriceMasterLastPurc	 = ""
+				varUpdateItemMasterPurchasePriceRecords = 0
+				varLastPurchaseDate = ""
+				varLastPurchaseVendor = ""
+				varLastPurchaseAddedBy = ""
+				varLapkingInternalLastPurchasePrice = ""
+				varDifferenceinPriceMasterLapkingInternal	 = ""
+				varLapkingInternalLastPurchaseDate = ""
+				varLapkingInternalPurchaseAddedBy	 = ""
+				varL1PurchasePrice = ""
+				varL1PurchaseDate = ""
+				varL1PurchaseVendor = ""
+				varL2PurchasePrice = ""
+				varL2PurchaseDate = ""
+				varL2PurchaseVendor = ""
+				varL3PurchasePrice = ""
+				varL3PurchaseDate = ""
+				varL3PurchaseVendor = ""
+				varRemarks = ""
+				
+				
+				
+				'Item Name	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("ITMItemCode").Value)
+				varItemCode  = .Fields("ITMItemCode").Value
+				Grid_Throw_Data .Fields("TIMName").Value
+				
+				'Item Alias	Text	LEFT	40	---	No
+				Grid_Throw_Data .Fields("TIMAlias").Value									
+				
+				'Busy Group Name	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(BusyLib.GetParentGrp(.Fields("TIMBusyParentGroupCode").Value))				
+				Grid_Throw_Data .Fields("TBPGNMName").Value	
+				
+				'Parent Group Name	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TIMAIParentGroupCode").Value)
+				If (.Fields("TPGNMName").Value) <> "" Then
+					varParentGroupName =  .Fields("TPGNMName").Value
+				Else
+					varParentGroupName = ""
+				End If
+				Grid_Throw_Data varParentGroupName				
+				
+				'Group Name	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TIMAIGroupCode").Value)
+				If (.Fields("TGNMName").Value) <> "" Then
+					varGroupName =  .Fields("TGNMName").Value
+				Else
+					varGroupName = ""
+				End If
+				Grid_Throw_Data varGroupName				
+				
+				'Manufacturing Brand	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TIMAIManufacturingBrandCode").Value)
+				If (.Fields("TMBMName").Value) <> "" Then
+					varManufacturingBrand =  .Fields("TMBMName").Value
+				Else
+					varManufacturingBrand = ""
+				End If
+				
+				Grid_Throw_Data varManufacturingBrand				
+				
+				'Consumer Brand	Text	LEFT	40	---	No
+				'Grid_Throw_Data BusyLib.MasterCode2Name(.Fields("TIMAIConsumberBrandCode").Value)
+				If (.Fields("TCBMName").Value) <> "" Then
+					varConsumerBrand =  .Fields("TCBMName").Value
+				Else
+					varConsumerBrand = ""
+				End If
+				Grid_Throw_Data varConsumerBrand				
+				
+				
+				'Opening Price	Numeric	RIGHT	16	2	No
+				If .Fields("TIOPOpeningPrice").Value <> 0 Then
+					Grid_Throw_Data  .Fields("TIOPOpeningPrice").Value
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Item Master Purchase Price	Numeric	RIGHT	16	2	No
+				varItemMasterPurchasePrice = .Fields("TIMItemMasterPurchasePrice").Value
+				If varItemMasterPurchasePrice <> 0 Then
+					Grid_Throw_Data varItemMasterPurchasePrice
+				Else
+					Grid_Throw_Data ""
+				End If
+				'Last Purchase Price	Numeric	RIGHT	16	2	No
+				varLastPurchasePrice = .Fields("TLPILastPurchasePrice").Value
+				If varLastPurchasePrice <> 0 Then
+					Grid_Throw_Data varLastPurchasePrice
+				Else
+					Grid_Throw_Data ""
+				End If
+				'Difference in Price (Master - Last Purc)	Numeric	RIGHT	16	2	No				
+				If varLastPurchasePrice <> 0 And (varItemMasterPurchasePrice - varLastPurchasePrice) <> 0 Then
+					Grid_Throw_Data (varItemMasterPurchasePrice - varLastPurchasePrice)
+					If BooleanUpdateLastPurcVchPriceinItemMaster = True Then
+						varUpdateItemMasterPurchasePriceRecords = UpdateItemMasterPurchasePrice( .Fields("ITMItemCode").Value, .Fields("TLPILastPurchasePrice").Value)
+						If varUpdateItemMasterPurchasePriceRecords = 1 Then
+							varRemarks = varRemarks & "Updated Item Master Purc Price: " & .Fields("TLPILastPurchasePrice").Value & " "
+						End If
+					End If
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				
+				'Last Purchase Date	Date	CENTER	10	---	No
+				Grid_Throw_Data  .Fields("TLPILastPurchaseDate").Value
+				
+				'Last Purchase Vendor	Text	LEFT	40	---	No
+				Grid_Throw_Data  .Fields("TLPILastPurchaseVendorName").Value
+				
+				
+				'Last Purchase VchNo	Text	CENTER	12	---	No
+				Grid_Throw_Data  .Fields("TLPILastPurchaseVchNo").Value
+				
+				
+				'Last Purchase Added By	Text	LEFT	40	---	No
+				Grid_Throw_Data  ""
+				
+				'Last Lapking Intenral Purchase Price	Numeric	RIGHT	16	2	No
+				varLapkingInternalLastPurchasePrice = .Fields("TLILPILastLapkingInternalPurchasePrice").Value
+				If varLapkingInternalLastPurchasePrice <> 0 Then
+					Grid_Throw_Data varLapkingInternalLastPurchasePrice
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Difference in Price (Master - Lapking Internal)	Numeric	RIGHT	16	2	No				
+				If varLapkingInternalLastPurchasePrice <> 0 And (varItemMasterPurchasePrice - varLapkingInternalLastPurchasePrice) <> 0 Then
+					Grid_Throw_Data (varItemMasterPurchasePrice - varLapkingInternalLastPurchasePrice)
+				Else
+					Grid_Throw_Data ""
+				End If
+				
+				'Last Lapking Intenral Purchase Date	Date	CENTER	10	---	No
+				Grid_Throw_Data .Fields("LastLapkingInternalPurchaseDate").Value
+				
+				'Lapking Internal Purchase VchNo	Text	CENTER	12	---	No
+				Grid_Throw_Data .Fields("LastLapkingInternalPurchaseVchNo").Value
+				'Lapking Internal Purchase Added By	Text	LEFT	40	---	No
+				Grid_Throw_Data ""
+				'L1 Purchase Price	Numeric	RIGHT	16	2	No
+				Grid_Throw_Data ""
+				'L1 Purchase Date	Date	CENTER	10	---	No
+				Grid_Throw_Data ""
+				'L1 Purchase Vendor	Text	LEFT	40	---	No
+				Grid_Throw_Data ""
+				'L2 Purchase Price	Numeric	RIGHT	16	2	No
+				Grid_Throw_Data ""
+				'L2 Purchase Date	Date	CENTER	10	---	No
+				Grid_Throw_Data ""
+				'L2 Purchase Vendor	Text	LEFT	40	---	No
+				Grid_Throw_Data ""
+				'L3 Purchase Price	Numeric	RIGHT	16	2	No
+				Grid_Throw_Data ""
+				'L3 Purchase Date	Date	CENTER	10	---	No
+				Grid_Throw_Data ""
+				'L3 Purchase Vendor	Text	LEFT	40	---	No
+				Grid_Throw_Data ""
+				'Blocked Status	Text	CENTER	12	---	No
+				Grid_Throw_Data .Fields("TIMBlockedStatus").Value				
+				'Deactivated Status	Text	CENTER	12	---	No				
+				Grid_Throw_Data .Fields("TIMBDeactivatedStatus").Value				
+				'Remarks	Text	LEFT	40	---	No
+				Grid_Throw_Data Trim(varRemarks)
+				
+				Grid_Next_Row .Fields("ITMItemCode").Value & "-" & .Fields("TLPILastPurchaseVendorCode").Value& "-" & .Fields("TLPILastPurchaseMaterialCenterCode").Value
+				
+				.MoveNext
+			Loop
+		End If
+	End With
+	
+	
+	
+	'Item Name	Text	LEFT	40	---	No
+	'Item Code	Text	LEFT	14	---	No
+	'Busy Group Name	Text	LEFT	40	---	No
+	'Parent Group Name	Text	LEFT	40	---	No
+	'Group Name	Text	LEFT	40	---	No
+	'Manufacturing Brand	Text	LEFT	40	---	No
+	'Consumer Brand	Text	LEFT	40	---	No
+	'Opening Price	Numeric	RIGHT	16	2	No
+	'Item Master Purchase Price	Numeric	RIGHT	16	2	No
+	'Last Purchase Price	Numeric	RIGHT	16	2	No
+	'Difference in Price (Master - Last Purc)	Numeric	RIGHT	16	2	No
+	'Last Purchase Date	Date	CENTER	10	---	No
+	'Last Purchase Vendor	Text	LEFT	40	---	No
+	'Last Purchase VchNo	Text	CENTER	12	---	No
+	'Last Purchase Added By	Text	LEFT	40	---	No
+	'Lapking Internal Last Purchase Price	Numeric	RIGHT	16	2	No
+	'Difference in Price (Master - Lapking Internal)	Numeric	RIGHT	16	2	No
+	'Lapking Internal Last Purchase Date	Date	CENTER	10	---	No
+	'Lapking Internal Purchase VchNo	Text	CENTER	12	---	No
+	'Lapking Internal Purchase Added By	Text	LEFT	40	---	No
+	'L1 Purchase Price	Numeric	RIGHT	16	2	No
+	'L1 Purchase Date	Date	CENTER	10	---	No
+	'L1 Purchase Vendor	Text	LEFT	40	---	No
+	'L2 Purchase Price	Numeric	RIGHT	16	2	No
+	'L2 Purchase Date	Date	CENTER	10	---	No
+	'L2 Purchase Vendor	Text	LEFT	40	---	No
+	'L3 Purchase Price	Numeric	RIGHT	16	2	No
+	'L3 Purchase Date	Date	CENTER	10	---	No
+	'L3 Purchase Vendor	Text	LEFT	40	---	No
+	'Blocked Status	Text	CENTER	12	---	No
+	'Deactivated Status	Text	CENTER	12	---	No
+	'Remarks	Text	LEFT	40	---	No
+End Sub
+
+
+Public Sub OnEnterChs(p_OnEnterInfo)
+	
+	Dim varGridRowCodes
+	Dim varItemCode
+	Dim varVendorAccountCode
+	Dim varMaterialCenterMaserCode
+	Dim varOptionToOpen
+	
+	varGridRowCodes = Split(p_OnEnterInfo,"-")
+	varItemCode = varGridRowCodes(0)
+	varVendorAccountCode = varGridRowCodes(1)
+	varMaterialCenterMaserCode = varGridRowCodes(2)
+	
+	varOptionToOpen =  BusyLib.GetOption3("Choose Option", "Item Master","Item Ledger","Vendor Ledger","Selection:",2)
+	'WriteInEventLog "varOptionToOpen:"&varOptionToOpen&" varItemCode:"&varItemCode&" varVendorAccountCode:"&varVendorAccountCode&" varMaterialCenterMaserCode:"&varMaterialCenterMaserCode,CTBCRScriptLogFileName
+	If varOptionToOpen = 1 And varItemCode <> "" Then
+		OnEnter_Modify_Master BusyConst.ITEM_MAST,varItemCode
+	ElseIf varOptionToOpen = 2 And varItemCode <> "" Then	
+		OnEnter_Item_Ledger varItemCode,varMaterialCenterMaserCode,DateAdd("m",-3,Date),Date,True,False
+		
+	ElseIf varOptionToOpen = 3 And varVendorAccountCode <> "" Then
+		OnEnter_Acc_Ledger varVendorAccountCode,DateAdd("m",-3,Date),Date
+	End If	
+	
+End Sub
+
+
+Public Sub UpdateFieldsInfo()
+	'	If BusyRepOpt.OptItemRange = 2  Then	'Item Group Selected
+	'		varItemMasterParentGroupCode = BusyRepOpt.OptIGrpCode
+	'		BusyGrid.AddTopLabel1 = MasterCode2Name(BusyRepOpt.OptIGrpCode)
+	'	Else
+	'		BusyGrid.AddTopLabel1 "Top Label 1"
+	'	End If
+	BusyGrid.AddTopLabel1 "Top Label 1"
+	BusyGrid.AddTopLabel2  CTBCRByPrachaitVersion
+	BusyGrid.AddInfoLabel1 CTBCRResponsbilePersonForReport
+	BusyGrid.AddInfoLabel2 CTBCRByDevelopedPrachaitContactInformation
+	BusyGrid.AddInfoLabel3 CTBCRTodo
+	BusyGrid.AddInfoLabel4 "Status : ... Keep working !"
+End Sub
+
+
+Public Sub UpdateObjects(CEvents)
+	Set BusyLib = CreateObject("Busy2L21.CFixedInterface")
+	Set BusyConst = CreateObject("BusyCSC21.CGlobalConstants")
+	Set BusyRepOpt = CreateObject("Busy2L21.CRepOptions")
+	Set BusyCompConfig = CreateObject("Busy2L21.CCompany")
+	
+	Set BusyGrid = CEvents
+	Set BusyOnEnter = CEvents
+	
+	BusyUpdateRepOpt BusyRepOpt
+	BusyUpdateCompConfig BusyCompConfig
+End Sub
+
+
+Public Sub QuitRep(p_QuitVal)
+	m_QuitRep = p_QuitVal
+End Sub
+
+
+Public Sub Grid_Throw_Data(p_Data)
+	BusyGrid.ThrowData p_Data
+End Sub
+
+
+Public Sub Grid_Next_Row(p_OnEnterInfo)
+	BusyGrid.NextRow p_OnEnterInfo
+End Sub
+
+
+Public Sub Grid_Next_Row_With_Special_Effect(p_OnEnterInfo,p_SEConst)
+	BusyGrid.NextRow p_OnEnterInfo, p_SEConst
+End Sub
+
+
+Public Sub Grid_New_Entry()
+	BusyGrid.NewEntry
+End Sub
+
+
+Public Sub Grid_Total_Rows(p_TotalRows)
+	BusyGrid.TotalRows p_TotalRows
+End Sub
+
+
+Public Sub BusyUpdateCompConfig(p_Obj)
+	BusyGrid.UpdateCompConfig p_Obj
+End Sub
+
+
+Public Sub BusyUpdateRepOpt(p_Obj)
+	BusyGrid.UpdateRepOpt p_Obj
+End Sub
+
+
+Public Sub UpdateFormLabels()
+	
+End Sub
+
+
+'Public Sub AddTopLabel1(p_Label)
+'	BusyGrid.AddTopLabel1 p_Label 
+'End Sub 
+
+
+'Public Sub AddTopLabel2(p_Label)
+'	BusyGrid.AddTopLabel2 p_Label 
+'End Sub 
+
+
+'Public Sub AddInfoLabel1(p_Label)
+'	BusyGrid.AddInfoLabel1 p_Label 
+'End Sub 
+
+
+'Public Sub AddInfoLabel2(p_Label)
+'	BusyGrid.AddInfoLabel2 p_Label 
+'End Sub 
+
+
+'Public Sub AddInfoLabel3(p_Label)
+'	BusyGrid.AddInfoLabel3 p_Label 
+'End Sub 
+
+
+'Public Sub AddInfoLabel4(p_Label)
+'	BusyGrid.AddInfoLabel4 p_Label 
+'End Sub 
+
+
+Public Sub BusySetRepOpt(p_Obj)
+	BusyGrid.SetRepOpt p_Obj
+End Sub
+
+
+Public Sub BusyAddNewColumn(p_ColumnName, p_ColumnDataType, p_ColumnAlignment, p_ColumnMaxChar, p_ColumnMaxDecimal, p_ColumnShowTotal)
+	BusyGrid.AddNewColumn p_ColumnName, p_ColumnDataType, p_ColumnAlignment, p_ColumnMaxChar, p_ColumnMaxDecimal, p_ColumnShowTotal
+End Sub
+
+
+Public Sub OnEnter_Modify_Master(p_MasterType, p_MasterCode)
+	BusyOnEnter.ModifyMaster p_MasterType,p_MasterCode
+End Sub
+
+
+Public Sub OnEnter_Modify_Voucher(p_VchCode)
+	BusyOnEnter.ModifyVoucher p_VchCode
+End Sub
+
+
+Public Sub OnEnter_Acc_Ledger(p_AccCode, p_StartDate, p_EndDate)
+	BusyOnEnter.ShowAccLedger p_AccCode, p_StartDate, p_EndDate 
+End Sub
+
+
+Public Sub OnEnter_Acc_Ledger_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowAccLedgerWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Item_Ledger(p_ItemCode, p_MCCode, p_StartDate, p_EndDate, p_ShowVal, p_IUT)
+	BusyOnEnter.ShowItemMCLedger p_ItemCode, p_MCCode, p_StartDate, p_EndDate, p_ShowVal, p_IUT
+End Sub
+
+
+Public Sub OnEnter_Item_Ledger_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowItemMCLedgerWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Vch_List(p_VchType, p_StartDate, p_EndDate, p_VchSeriesCode)
+	BusyOnEnter.ShowVchsList p_VchType, p_StartDate, p_EndDate, p_VchSeriesCode
+End Sub
+
+
+Public Sub OnEnter_Vch_List_With_RepOpt(p_RepOptObj)
+	BusyOnEnter.ShowVchsListWithRepOpt p_RepOptObj
+End Sub
+
+
+Public Sub OnEnter_Custom_Report(p_FormatName, p_RepOptObj)
+	BusyOnEnter.ShowCustomReport p_FormatName, p_RepOptObj
+End Sub
+
+'Function by Developer - Prachait Saxena
+Public Function WriteInEventLog(LogText,LogFileName)
+	On Error Resume Next
+	dtmThisDay = Day(Date)
+	dtmThisMonth = Month(Date)
+	dtmThisYear = Year(Date)
+	dtmThisHour = Hour(Time)
+	dtmThisMinute = Minute(Time)
+	dtmThisSecond = Second(Time)
+	
+	If LogFileName = "" Then
+		LogFileName = CTBCRScriptLogFileName
+	End If 
+	Const ForAppending = 8
+	Set objFSO = CreateObject("Scripting.FileSystemObject")
+	
+	Set objTextFile = objFSO.OpenTextFile _
+	(LogFileName, ForAppending, True)
+	objTextFile.Write dtmThisYear&":"& dtmThisMonth&":"& dtmThisDay&" " & dtmThisHour&":"&dtmThisMinute&":"&dtmThisSecond& " - "  & LogText & vbCrLf
+	objTextFile.Close
+	WriteInEventLog = 1
+	'strBackupName = dtmThisYear & "_" & dtmThisMonth & "_" & dtmThisDay
+End Function
+
+'Update Item Master Purchase Price 
+Public Function UpdateItemMasterPurchasePrice(P_ItemCode,P_ItemMasterPruchasePrice)
+	On Error Resume Next
+	Dim UpdateQuery
+	Dim RecordSet
+	UpdateQuery = "Update [Master1] " &_
+	"SET [D4] = '"&P_ItemMasterPruchasePrice&"' " & _ 
+	"WHERE [Code] = '"&P_ItemCode&"' " & _ 
+	"AND [MasterType] = 6"
+	'WriteInEventLog UpdateQuery,CTBCRScriptLogFileName	
+	Set RecordSet= BusyLib.GetRecordset(UpdateQuery)
+	UpdateItemMasterPurchasePrice = 1
+End Function
